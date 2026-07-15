@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0B0B12">
+  <meta name="description" content="Piano — apprends le clavier de zéro : leçons guidées, mélodies pas à pas, accords, gammes, cycle des quintes et entraînement de l'oreille.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Piano">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Piano</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-180-v3.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192-v3.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512-v3.png">
+  <link rel="stylesheet" href="fonts/fonts.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <header class="head">
+      <h1 class="head__title">Piano</h1>
+      <p class="head__sub" id="headSub">L'atelier du clavier</p>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button class="tab tab--active" data-tab="jouer" type="button">Jouer</button>
+      <button class="tab" data-tab="apprendre" type="button">Apprendre</button>
+      <button class="tab" data-tab="entrainer" type="button">Entraîner</button>
+      <button class="tab" data-tab="dico" type="button">Dico</button>
+    </nav>
+
+    <!-- Zone de contenu du mode actif (au-dessus du clavier) -->
+    <section class="stage" id="stage"></section>
+
+    <!-- Le clavier — pièce maîtresse, commune à tous les modes -->
+    <section class="kb-wrap">
+      <div class="kb-tools">
+        <button class="kb-tool" id="octDown" type="button" aria-label="Octave grave">‹</button>
+        <span class="kb-range" id="kbRange">Do3 – Si4</span>
+        <button class="kb-tool" id="octUp" type="button" aria-label="Octave aiguë">›</button>
+        <span class="kb-spacer"></span>
+        <button class="kb-tool kb-tool--wide" id="labelsBtn" type="button">Do Ré Mi</button>
+      </div>
+      <div class="kb" id="kb"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
