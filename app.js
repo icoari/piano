@@ -44,19 +44,87 @@
   const COF_PC = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5];
   const DEGREES = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
 
-  // Mélodies guidées (notes MIDI, Do central = 60)
+  // Mélodies guidées — écrites en noms de notes pour rester lisibles.
+  // N('C4 F#4 Bb3 …') -> tableau MIDI (Do central = C4 = 60).
+  function N(str) {
+    const L = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+    return str.trim().split(/\s+/).map(t => {
+      const m = t.match(/^([A-G])([#b]?)(\d)$/);
+      return (Number(m[3]) + 1) * 12 + L[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+    });
+  }
+  // beats (optionnel) : durée relative de chaque note (1 = noire) — utilisé
+  // pour que « Écouter » restitue le vrai rythme du morceau.
   const SONGS = [
-    { id: 'lune', name: 'Au clair de la lune', icon: '🌙', level: 'Néophyte',
-      notes: [60, 60, 60, 62, 64, 62, 60, 64, 62, 62, 60] },
-    { id: 'jacques', name: 'Frère Jacques', icon: '🔔', level: 'Néophyte',
-      notes: [60, 62, 64, 60, 60, 62, 64, 60, 64, 65, 67, 64, 65, 67, 67, 69, 67, 65, 64, 60, 67, 69, 67, 65, 64, 60, 60, 55, 60, 60, 55, 60] },
-    { id: 'joie', name: 'Ode à la joie', icon: '🎼', level: 'Facile',
-      notes: [64, 64, 65, 67, 67, 65, 64, 62, 60, 60, 62, 64, 64, 62, 62, 64, 64, 65, 67, 67, 65, 64, 62, 60, 60, 62, 64, 62, 60, 60] },
-    { id: 'birthday', name: 'Joyeux anniversaire', icon: '🎂', level: 'Facile',
-      notes: [55, 55, 57, 55, 60, 59, 55, 55, 57, 55, 62, 60, 55, 55, 67, 64, 60, 59, 57, 65, 65, 64, 60, 62, 60] },
-    { id: 'jingle', name: 'Vive le vent', icon: '🎄', level: 'Facile',
-      notes: [64, 64, 64, 64, 64, 64, 64, 67, 60, 62, 64, 65, 65, 65, 65, 65, 64, 64, 64, 64, 62, 62, 64, 62, 67] },
+    // --- Comptines ---
+    { id: 'lune', name: 'Au clair de la lune', icon: '🌙', level: 'Néophyte', cat: 'comptines',
+      notes: N('C4 C4 C4 D4 E4 D4 C4 E4 D4 D4 C4'),
+      beats: [1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 4] },
+    { id: 'jacques', name: 'Frère Jacques', icon: '🔔', level: 'Néophyte', cat: 'comptines',
+      notes: N('C4 D4 E4 C4 C4 D4 E4 C4 E4 F4 G4 E4 F4 G4 G4 A4 G4 F4 E4 C4 G4 A4 G4 F4 E4 C4 C4 G3 C4 C4 G3 C4'),
+      beats: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 0.5, 0.5, 0.5, 0.5, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1, 1, 2, 1, 1, 2] },
+    { id: 'twinkle', name: 'Ah ! vous dirai-je, maman', icon: '⭐', level: 'Néophyte', cat: 'comptines',
+      notes: N('C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4 G4 G4 F4 F4 E4 E4 D4 G4 G4 F4 F4 E4 E4 D4 C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4'),
+      beats: [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2] },
+    // --- Classique ---
+    { id: 'joie', name: 'Ode à la joie · Beethoven', icon: '🎼', level: 'Facile', cat: 'classique',
+      notes: N('E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4 E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4'),
+      beats: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2] },
+    { id: 'symph5', name: '5ᵉ Symphonie · Beethoven', icon: '🎻', level: 'Facile', cat: 'classique',
+      notes: N('G4 G4 G4 Eb4 F4 F4 F4 D4 G4 G4 G4 Eb4 Ab4 Ab4 Ab4 G4 Eb5 Eb5 Eb5 C5'),
+      beats: [0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3] },
+    { id: 'elise', name: 'Lettre à Élise · Beethoven', icon: '🕯️', level: 'Moyen', cat: 'classique',
+      notes: N('E5 D#5 E5 D#5 E5 B4 D5 C5 A4 C4 E4 A4 B4 E4 G#4 B4 C5 E4 E5 D#5 E5 D#5 E5 B4 D5 C5 A4 C4 E4 A4 B4 E4 C5 B4 A4'),
+      beats: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 2] },
+    { id: 'menuet', name: 'Menuet en sol · Bach', icon: '🎩', level: 'Moyen', cat: 'classique',
+      notes: N('D5 G4 A4 B4 C5 D5 G4 G4 E5 C5 D5 E5 F#5 G5 G4 G4 C5 D5 C5 B4 A4 B4 C5 B4 A4 G4 F#4 G4 A4 B4 G4 A4'),
+      beats: [1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 3] },
+    { id: 'nachtmusik', name: 'Petite musique de nuit · Mozart', icon: '🌃', level: 'Moyen', cat: 'classique',
+      notes: N('G4 D4 G4 D4 G4 D4 G4 B4 D5 C5 A4 C5 A4 C5 A4 F#4 A4 D4'),
+      beats: [1.5, 0.5, 1.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2, 1.5, 0.5, 1.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2] },
+    { id: 'turque', name: 'Marche turque · Mozart', icon: '🏇', level: 'Difficile', cat: 'classique',
+      notes: N('B4 A4 G#4 A4 C5 D5 C5 B4 C5 E5 F5 E5 D#5 E5 B5 A5 G#5 A5 B5 A5 G#5 A5 C6'),
+      beats: [0.5, 0.5, 0.5, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2] },
+    { id: 'canon', name: 'Canon · Pachelbel', icon: '⛪', level: 'Facile', cat: 'classique',
+      notes: N('F#5 E5 D5 C#5 B4 A4 B4 C#5 D5 C#5 B4 A4 G4 F#4 G4 E4') },
+    { id: 'toccata', name: 'Toccata en ré mineur · Bach', icon: '⚡', level: 'Moyen', cat: 'classique',
+      notes: N('A5 G5 A5 G5 F5 E5 D5 C#5 D5 A4 G4 A4 E4 F4 C#4 D4'),
+      beats: [1, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 1, 2.5, 1, 0.5, 2, 0.5, 0.5, 1, 3] },
+    { id: 'dvorak', name: 'Symphonie du Nouveau Monde · Dvořák', icon: '🌍', level: 'Moyen', cat: 'classique',
+      notes: N('E4 G4 G4 E4 D4 C4 D4 E4 G4 E4 D4 E4 G4 G4 E4 D4 C4 D4 E4 D4 C4'),
+      beats: [1, 1, 1.5, 0.5, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1.5, 0.5, 1, 1, 1, 1, 1, 3] },
+    { id: 'brahms', name: 'Berceuse · Brahms', icon: '😴', level: 'Moyen', cat: 'classique',
+      notes: N('E4 E4 G4 E4 E4 G4 E4 G4 C5 B4 A4 A4 G4 D4 E4 F4 D4 D4 E4 F4 D4 F4 B4 A4 G4 B4 C5'),
+      beats: [0.5, 0.5, 2, 0.5, 0.5, 2, 0.5, 0.5, 1, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 1, 1, 1, 1, 1, 2] },
+    { id: 'greensleeves', name: 'Greensleeves · Traditionnel', icon: '🍃', level: 'Moyen', cat: 'classique',
+      notes: N('A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 A4 A4 G#4 A4 B4 G#4 E4 A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 B4 A4 G#4 F#4 G#4 A4 A4') },
+    // --- Films ---
+    { id: 'starwars', name: 'Star Wars · J. Williams', icon: '⚔️', level: 'Moyen', cat: 'films',
+      notes: N('G4 G4 G4 C5 G5 F5 E5 D5 C6 G5 F5 E5 D5 C6 G5 F5 E5 F5 D5'),
+      beats: [0.5, 0.5, 0.5, 2, 2, 0.5, 0.5, 0.5, 2, 1, 0.5, 0.5, 0.5, 2, 1, 0.5, 0.5, 0.5, 2] },
+    { id: 'potter', name: 'Harry Potter · J. Williams', icon: '🪄', level: 'Difficile', cat: 'films',
+      notes: N('B4 E5 G5 F#5 E5 B5 A5 F#5 E5 G5 F#5 D#5 F5 B4'),
+      beats: [1, 1.5, 0.5, 1, 2, 1, 3, 3, 1.5, 0.5, 1, 2, 1, 3] },
+    { id: 'pirates', name: 'Pirates des Caraïbes', icon: '🏴‍☠️', level: 'Moyen', cat: 'films',
+      notes: N('A4 C5 D5 D5 D5 E5 F5 F5 F5 G5 E5 E5 D5 C5 C5 D5'),
+      beats: [0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 2] },
+    { id: 'panther', name: 'La Panthère rose · Mancini', icon: '🐾', level: 'Difficile', cat: 'films',
+      notes: N('D#4 E4 F#4 G4 D#4 E4 F#4 G4 C5 B4 E4 G4 B4 Bb4 A4 G4 E4 D4 E4'),
+      beats: [0.5, 2, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 1.5, 1.5, 0.5, 0.5, 0.5, 1.5, 1, 1, 1, 1, 3] },
+    // --- Chansons & fêtes ---
+    { id: 'birthday', name: 'Joyeux anniversaire', icon: '🎂', level: 'Facile', cat: 'chansons',
+      notes: N('G3 G3 A3 G3 C4 B3 G3 G3 A3 G3 D4 C4 G3 G3 G4 E4 C4 B3 A3 F4 F4 E4 C4 D4 C4'),
+      beats: [0.5, 0.5, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 1, 3] },
+    { id: 'jingle', name: 'Vive le vent', icon: '🎄', level: 'Facile', cat: 'chansons',
+      notes: N('E4 E4 E4 E4 E4 E4 E4 G4 C4 D4 E4 F4 F4 F4 F4 F4 E4 E4 E4 E4 D4 D4 E4 D4 G4'),
+      beats: [0.5, 0.5, 1, 0.5, 0.5, 1, 0.5, 0.5, 0.75, 0.25, 2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2] },
+    { id: 'nuit', name: 'Douce nuit', icon: '✨', level: 'Moyen', cat: 'chansons',
+      notes: N('G4 A4 G4 E4 G4 A4 G4 E4 D5 D5 B4 C5 C5 G4 A4 A4 C5 B4 A4 G4 A4 G4 E4 A4 A4 C5 B4 A4 G4 A4 G4 E4 D5 D5 F5 D5 B4 C5 E5 C5 G4 E4 G4 F4 D4 C4'),
+      beats: [1.5, 0.5, 1, 3, 1.5, 0.5, 1, 3, 2, 1, 3, 2, 1, 3, 2, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 3, 2, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 3, 2, 1, 1.5, 0.5, 1, 3, 3, 1, 1, 1, 1.5, 0.5, 1, 4] },
+    { id: 'saints', name: 'When the Saints', icon: '🎺', level: 'Facile', cat: 'chansons',
+      notes: N('C4 E4 F4 G4 C4 E4 F4 G4 C4 E4 F4 G4 E4 C4 E4 D4 E4 D4 C4 C4 E4 G4 G4 G4 F4 E4 F4 G4 E4 C4 D4 C4') },
   ];
+  const SONG_CATS = [['tout', 'Tout'], ['comptines', 'Comptines'], ['classique', 'Classique'], ['films', 'Films'], ['chansons', 'Chansons']];
 
   // ---------- Progression ----------
   function loadProg() {
@@ -539,9 +607,16 @@
   }
 
   // ================= JOUER =================
+  let jouerCat = 'tout';
   function renderJouer() {
     headSub.textContent = 'Joue librement, ou laisse-toi guider';
-    const rows = SONGS.map(s => `
+    const list = jouerCat === 'tout' ? SONGS : SONGS.filter(s => s.cat === jouerCat);
+    const doneCount = SONGS.filter(s => prog.songs[s.id]).length;
+    const pills = SONG_CATS.map(([k, lbl]) => {
+      const n = k === 'tout' ? SONGS.length : SONGS.filter(s => s.cat === k).length;
+      return `<button class="pill pill--small ${k === jouerCat ? 'pill--on' : ''}" data-cat="${k}" type="button">${lbl} · ${n}</button>`;
+    }).join('');
+    const rows = list.map(s => `
       <button class="songrow" data-song="${s.id}" type="button">
         <span class="songrow__icon">${s.icon}</span>
         <span class="songrow__main">
@@ -552,11 +627,13 @@
       </button>`).join('');
     stage.innerHTML = `
       <div class="card">
-        <div class="card__title">Mélodies guidées</div>
+        <div class="card__title">Mélodies guidées ${doneCount ? `<span class="songcount">${doneCount}/${SONGS.length} jouées</span>` : ''}</div>
         <div class="card__sub">La touche à jouer s'illumine — avance à ton rythme, sans métronome.</div>
-        <div class="songlist" style="margin-top:12px">${rows}</div>
+        <div class="pills" style="margin-top:10px">${pills}</div>
+        <div class="songlist" style="margin-top:10px">${rows}</div>
         <p class="freeplay-hint">…ou joue librement : chaque touche sonne, tout simplement.</p>
       </div>`;
+    stage.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { jouerCat = b.dataset.cat; renderJouer(); }));
     stage.querySelectorAll('[data-song]').forEach(b => b.addEventListener('click', () => startSong(b.dataset.song)));
   }
 
@@ -582,7 +659,7 @@
             : `<div class="session__text">Note <strong>${i + 1} / ${song.notes.length}</strong> — joue la touche qui brille.</div>`}
           <div class="session__progress"><i style="width:${Math.round(i / song.notes.length * 100)}%"></i></div>
           <div class="session__row">
-            ${done ? '' : `<button class="btn btn--ghost btn--small" data-hear type="button">Écouter la suite</button>`}
+            ${done ? `<button class="btn btn--ghost btn--small" data-full type="button">🔊 Réécouter</button>` : `<button class="btn btn--ghost btn--small" data-hear type="button">Écouter la suite</button>`}
             <button class="btn btn--ghost btn--small" data-quit type="button">${done ? 'Retour' : 'Quitter'}</button>
             ${done ? `<button class="btn btn--small" data-again type="button">Rejouer</button>` : ''}
           </div>
@@ -590,8 +667,20 @@
       stage.querySelector('[data-quit]')?.addEventListener('click', () => { noteHandler = null; clearMarks(); onBack(); });
       stage.querySelector('[data-again]')?.addEventListener('click', () => (onAgain ? onAgain() : startSongObj(song, onBack, onAgain)));
       stage.querySelector('[data-hear]')?.addEventListener('click', () => {
-        // fait entendre les 5 prochaines notes
-        song.notes.slice(i, i + 5).forEach((m, k) => playNote(m, 0.6, 0.7, k * 0.45));
+        // fait entendre les 5 prochaines notes, avec le vrai rythme
+        let t = 0;
+        song.notes.slice(i, i + 5).forEach((m, k) => {
+          playNote(m, 0.6, 0.7, t);
+          t += 0.45 * ((song.beats && song.beats[i + k]) || 1);
+        });
+      });
+      stage.querySelector('[data-full]')?.addEventListener('click', () => {
+        // le morceau en entier, comme il s'écoute
+        let t = 0;
+        song.notes.forEach((m, k) => {
+          playNote(m, 0.7, 0.75, t);
+          t += 0.42 * ((song.beats && song.beats[k]) || 1);
+        });
       });
       clearMarks();
       if (!done) {
