@@ -118,10 +118,103 @@
     midis.forEach((m, i) => playNote(m, 1.6, 0.8, i * arp));
   }
 
+  // ---------- Écoute (détection de hauteur au micro) ----------
+  // Pose le téléphone sur le vrai piano : l'app entend la note jouée et la
+  // fait suivre dans le même canal que le toucher. Autocorrélation (ACF2+)
+  // + stabilisation sur 2 trames + porte d'amplitude. Monophonique : parfait
+  // pour les mélodies et les leçons note à note (les accords se valident en
+  // arpège, note après note).
+  let micStream = null, micAnalyser = null, micTimer = null;
+  let listenOn = false;
+  let candMidi = null, candCount = 0, lastEmitted = null, silentFrames = 0;
+
+  function autoCorrelate(buf, sampleRate) {
+    let SIZE = buf.length;
+    let rms = 0;
+    for (let i = 0; i < SIZE; i++) { const v = buf[i]; rms += v * v; }
+    rms = Math.sqrt(rms / SIZE);
+    if (rms < 0.012) return -1;                      // trop faible → silence
+    let r1 = 0, r2 = SIZE - 1;
+    const thres = 0.2;
+    for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+    for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+    buf = buf.slice(r1, r2);
+    SIZE = buf.length;
+    if (SIZE < 32) return -1;
+    const c = new Float32Array(SIZE);
+    for (let i = 0; i < SIZE; i++)
+      for (let j = 0; j < SIZE - i; j++)
+        c[i] += buf[j] * buf[j + i];
+    let d = 0;
+    while (d < SIZE - 1 && c[d] > c[d + 1]) d++;
+    let maxval = -1, maxpos = -1;
+    for (let i = d; i < SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
+    if (maxpos <= 0) return -1;
+    let T0 = maxpos;
+    const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
+    const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
+    if (a) T0 = T0 - b / (2 * a);
+    return sampleRate / T0;
+  }
+
+  const liveEl = document.getElementById('kbLive');
+  function micTick() {
+    const buf = new Float32Array(micAnalyser.fftSize);
+    micAnalyser.getFloatTimeDomainData(buf);
+    const freq = autoCorrelate(buf, actx.sampleRate);
+    if (freq < 26 || freq > 4500) {                  // hors du piano → silence
+      silentFrames++;
+      if (silentFrames >= 3) { lastEmitted = null; candMidi = null; candCount = 0; if (liveEl) liveEl.textContent = '· · ·'; }
+      return;
+    }
+    silentFrames = 0;
+    const midi = Math.round(69 + 12 * Math.log2(freq / 440));
+    if (midi < 21 || midi > 108) return;
+    if (midi === candMidi) candCount++;
+    else { candMidi = midi; candCount = 1; }
+    if (liveEl) liveEl.textContent = noteName(midi);
+    // 2 trames stables (~130 ms) et pas de re-déclenchement de la même note
+    // tant qu'elle n'a pas été relâchée (silence) ou remplacée.
+    if (candCount >= 2 && midi !== lastEmitted) {
+      lastEmitted = midi;
+      micNote(midi);
+    }
+  }
+
+  async function startListening() {
+    audio();
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    const src = actx.createMediaStreamSource(micStream);
+    micAnalyser = actx.createAnalyser();
+    micAnalyser.fftSize = 2048;
+    src.connect(micAnalyser);
+    candMidi = null; candCount = 0; lastEmitted = null; silentFrames = 0;
+    micTimer = setInterval(micTick, 66);
+    listenOn = true;
+    if (liveEl) { liveEl.hidden = false; liveEl.textContent = '· · ·'; }
+    document.getElementById('listenBtn').classList.add('kb-tool--listen');
+  }
+  function stopListening() {
+    clearInterval(micTimer); micTimer = null;
+    try { micStream?.getTracks().forEach(t => t.stop()); } catch {}
+    micStream = null; micAnalyser = null; listenOn = false;
+    if (liveEl) liveEl.hidden = true;
+    document.getElementById('listenBtn').classList.remove('kb-tool--listen');
+  }
+  document.getElementById('listenBtn').addEventListener('click', async () => {
+    if (listenOn) { stopListening(); return; }
+    try { await startListening(); }
+    catch { if (liveEl) { liveEl.hidden = false; liveEl.textContent = 'micro refusé'; setTimeout(() => { liveEl.hidden = true; }, 2500); } }
+  });
+
   // ---------- Clavier ----------
   const kbEl = document.getElementById('kb');
   let octaveBase = 48;            // Do3
-  const WHITE_PER_VIEW = 14;      // 2 octaves
+  // En paysage on affiche 3 octaves — pensé pour poser le téléphone sur le piano.
+  function whitesPerView() { return window.innerWidth > window.innerHeight ? 21 : 14; }
+  let WHITE_PER_VIEW = whitesPerView();
   const WHITE_PC = [0, 2, 4, 5, 7, 9, 11];
   // position des noires : après quelle touche blanche de l'octave (index 0-6)
   const BLACK_AFTER = { 1: 0, 3: 1, 6: 3, 8: 4, 10: 5 };
@@ -166,9 +259,10 @@
       const bpc = pc + 1;
       if (!BLACK.has(bpc % 12)) return;
       const bm = m + 1;
-      const left = ((i + 1) / wCount * 100) - 4.25;
+      const bw = 127.5 / wCount;   // ≡ 8.5% quand 15 blanches sont visibles
+      const left = ((i + 1) / wCount * 100) - bw / 2;
       const extra = shown.get(bm) ? ` bkey--${shown.get(bm)}` : '';
-      html += `<button class="bkey${extra}" style="left:${left}%" data-midi="${bm}" type="button" aria-label="${noteName(bm)}">
+      html += `<button class="bkey${extra}" style="left:${left}%;width:${bw}%" data-midi="${bm}" type="button" aria-label="${noteName(bm)}">
         <span class="bkey__label">${prog.labels === 'off' ? '' : labelFor(bm)}</span>
       </button>`;
     });
@@ -192,15 +286,37 @@
     k.classList.add(c);
     setTimeout(() => k.classList.remove(c), ms);
   }
+  // Canal unique pour toutes les notes — écran OU vrai piano via le micro.
+  // Les leçons, mélodies guidées et l'enregistrement de partition sont
+  // agnostiques de la source.
+  let lastSynthAt = 0;
+  function emitNote(midi, fromMic) {
+    if (recording) recNotes.push({ m: midi, t: Date.now() - recStart });
+    if (noteHandler) noteHandler(midi);
+    if (recording && tab === 'partition') renderScoreLive();
+  }
   function pressKey(midi, el) {
     playNote(midi);
+    lastSynthAt = Date.now();   // le micro doit ignorer le son du synthé
     if (el) {
       const down = el.classList.contains('bkey') ? 'bkey--down' : 'key--down';
       el.classList.add(down);
       setTimeout(() => el.classList.remove(down), 140);
     }
     if (navigator.vibrate) { try { navigator.vibrate(4); } catch {} }
-    if (noteHandler) noteHandler(midi);
+    emitNote(midi, false);
+  }
+  function micNote(midi) {
+    // Anti-larsen logique : juste après une note jouée par le synthé, la
+    // détection entend l'app elle-même — on l'ignore.
+    if (Date.now() - lastSynthAt < 450) return;
+    const k = keyEl(midi);
+    if (k) {
+      const cls = k.classList.contains('bkey') ? 'bkey--down' : 'key--down';
+      k.classList.add(cls);
+      setTimeout(() => k.classList.remove(cls), 180);
+    }
+    emitNote(midi, true);
   }
 
   function clearMarks() {
@@ -217,7 +333,7 @@
   }
   function ensureVisible(midi) {
     // recadre le clavier pour que la note soit dans la fenêtre
-    const lo = octaveBase, hi = octaveBase + 24;
+    const lo = octaveBase, hi = octaveBase + (WHITE_PER_VIEW / 7) * 12;
     if (midi < lo) { octaveBase = Math.max(24, octaveBase - 12 * Math.ceil((lo - midi) / 12)); renderKeyboard(); }
     else if (midi > hi) { octaveBase = Math.min(84, octaveBase + 12 * Math.ceil((midi - hi) / 12)); renderKeyboard(); }
   }
@@ -260,7 +376,166 @@
     if (tab === 'jouer') renderJouer();
     else if (tab === 'apprendre') renderApprendre();
     else if (tab === 'entrainer') renderEntrainer();
+    else if (tab === 'partition') renderPartition();
     else renderDico();
+  }
+
+  // ================= PARTITION =================
+  // Ce que tu joues s'écrit : touche l'écran ou active l'Écoute et joue sur
+  // le vrai piano — les notes se posent sur la portée en direct.
+  let recording = false, recStart = 0, recNotes = [];
+  if (!Array.isArray(prog.recs)) prog.recs = [];
+
+  // midi → position diatonique (lettre + octave) pour la portée en clé de sol.
+  const PC_LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];   // C C# D D# E F F# G G# A A# B
+  const PC_SHARP = [false, true, false, true, false, false, true, false, true, false, true, false];
+  function diatonic(midi) {
+    const oct = Math.floor(midi / 12) - 1;
+    return oct * 7 + PC_LETTER[midi % 12];
+  }
+  const E4_DIA = diatonic(64);   // ligne du bas de la portée
+
+  function scoreSVG(notes) {
+    const GAP = 9;                     // interligne
+    const STEP = GAP / 2;              // un degré diatonique
+    const NW = 26;                     // espacement horizontal des notes
+    const left = 34;
+    const w = Math.max(300, left + notes.length * NW + 20);
+    const top = 30, bottomLine = top + 4 * GAP;
+    let s = `<svg class="score" viewBox="0 0 ${w} ${bottomLine + 42}" width="${w}">`;
+    for (let i = 0; i < 5; i++) {
+      const y = top + i * GAP;
+      s += `<line x1="8" y1="${y}" x2="${w - 8}" y2="${y}" class="score__line"/>`;
+    }
+    s += `<text x="12" y="${bottomLine - 2}" class="score__clef">𝄞</text>`;
+    notes.forEach((n, i) => {
+      const x = left + 14 + i * NW;
+      const y = bottomLine - (diatonic(n.m) - E4_DIA) * STEP;
+      // lignes supplémentaires
+      for (let ly = bottomLine + GAP; ly <= y + 1; ly += GAP)
+        s += `<line x1="${x - 8}" y1="${ly}" x2="${x + 8}" y2="${ly}" class="score__line"/>`;
+      for (let ly = top - GAP; ly >= y - 1; ly -= GAP)
+        s += `<line x1="${x - 8}" y1="${ly}" x2="${x + 8}" y2="${ly}" class="score__line"/>`;
+      if (PC_SHARP[n.m % 12]) s += `<text x="${x - 14}" y="${y + 3.5}" class="score__acc">♯</text>`;
+      s += `<ellipse cx="${x}" cy="${y}" rx="5.4" ry="4" class="score__note" transform="rotate(-18 ${x} ${y})"/>`;
+      s += `<line x1="${x + 5}" y1="${y - 1.5}" x2="${x + 5}" y2="${y - 26}" class="score__stem"/>`;
+    });
+    if (!notes.length) s += `<text x="${w / 2}" y="${bottomLine - GAP}" text-anchor="middle" class="score__empty">La portée attend tes notes…</text>`;
+    s += '</svg>';
+    return s;
+  }
+
+  function renderScoreLive() {
+    const holder = stage.querySelector('[data-live-score]');
+    if (!holder) return;
+    holder.innerHTML = scoreSVG(recNotes);
+    holder.scrollLeft = holder.scrollWidth;
+    const cnt = stage.querySelector('[data-rec-count]');
+    if (cnt) cnt.textContent = recNotes.length + ' note' + (recNotes.length > 1 ? 's' : '');
+  }
+
+  function renderPartition() {
+    headSub.textContent = 'Ce que tu joues s\'écrit';
+    noteHandler = null;
+    clearMarks();
+    if (recording) { renderRecordingUI(); return; }
+    const recs = prog.recs.slice().reverse();
+    const rows = recs.length ? recs.map(r => `
+      <div class="songrow" data-rec="${r.id}">
+        <span class="songrow__icon">𝄞</span>
+        <span class="songrow__main">
+          <span class="songrow__name">${escapeHTMLp(r.name)}</span>
+          <div class="songrow__meta">${r.notes.length} notes · ${new Date(r.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</div>
+        </span>
+      </div>`).join('') : '';
+    stage.innerHTML = `
+      <div class="card">
+        <div class="card__title">Nouvelle partition</div>
+        <div class="card__sub">Lance l'enregistrement puis joue — sur l'écran, ou sur ton vrai piano avec le mode <strong>Écoute</strong> activé.</div>
+        <div class="session__row" style="justify-content:flex-start">
+          <button class="btn btn--small" data-rec-start type="button">● Enregistrer</button>
+        </div>
+      </div>
+      ${recs.length ? `<div class="card"><div class="card__title">Mes partitions</div><div class="songlist" style="margin-top:10px">${rows}</div></div>` : ''}`;
+    stage.querySelector('[data-rec-start]').addEventListener('click', () => {
+      recording = true; recStart = Date.now(); recNotes = [];
+      renderRecordingUI();
+    });
+    stage.querySelectorAll('[data-rec]').forEach(el => el.addEventListener('click', () => openRec(el.dataset.rec)));
+  }
+
+  function renderRecordingUI() {
+    stage.innerHTML = `
+      <div class="card">
+        <div class="rec-head">
+          <span class="rec-dot"></span>
+          <span class="card__title">Enregistrement…</span>
+          <span class="rec-count" data-rec-count>0 note</span>
+        </div>
+        <div class="score-scroll" data-live-score></div>
+        <div class="session__row" style="justify-content:flex-start">
+          <button class="btn btn--small" data-rec-stop type="button">■ Terminer</button>
+          <button class="btn btn--ghost btn--small" data-rec-cancel type="button">Annuler</button>
+        </div>
+      </div>`;
+    renderScoreLive();
+    stage.querySelector('[data-rec-stop]').addEventListener('click', () => {
+      recording = false;
+      if (!recNotes.length) { renderPartition(); return; }
+      const name = 'Partition du ' + new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+        + ' · ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      prog.recs.push({ id: 'r' + Date.now().toString(36), name, date: Date.now(), notes: recNotes });
+      while (prog.recs.length > 20) prog.recs.shift();
+      saveProg();
+      openRec(prog.recs[prog.recs.length - 1].id);
+    });
+    stage.querySelector('[data-rec-cancel]').addEventListener('click', () => { recording = false; recNotes = []; renderPartition(); });
+  }
+
+  function openRec(id) {
+    const r = prog.recs.find(x => x.id === id);
+    if (!r) { renderPartition(); return; }
+    stage.innerHTML = `
+      <div class="card">
+        <div class="card__title" data-rec-name>${escapeHTMLp(r.name)}</div>
+        <div class="card__sub">${r.notes.length} notes · ${new Date(r.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</div>
+        <div class="score-scroll">${scoreSVG(r.notes)}</div>
+        <div class="session__row" style="justify-content:flex-start">
+          <button class="btn btn--small" data-play type="button">▶ Écouter</button>
+          <button class="btn btn--ghost btn--small" data-practice type="button">Travailler en guidé</button>
+          <button class="btn btn--ghost btn--small" data-rename type="button">Renommer</button>
+          <button class="btn btn--ghost btn--small" data-del type="button">Supprimer</button>
+          <button class="btn btn--ghost btn--small" data-back type="button">Retour</button>
+        </div>
+      </div>`;
+    stage.querySelector('[data-back]').addEventListener('click', renderPartition);
+    stage.querySelector('[data-play]').addEventListener('click', () => {
+      // rejoue avec le rythme d'origine (silences bornés à 1,2 s)
+      let acc = 0, prev = null;
+      r.notes.forEach((n) => {
+        const gap = prev === null ? 0 : Math.min(1200, Math.max(140, n.t - prev));
+        acc += gap;
+        prev = n.t;
+        playNote(n.m, 0.8, 0.8, acc / 1000);
+      });
+    });
+    stage.querySelector('[data-practice]').addEventListener('click', () => {
+      startSongObj({ id: null, name: r.name, icon: '𝄞', notes: r.notes.map(n => n.m) }, () => openRec(id));
+    });
+    stage.querySelector('[data-rename]').addEventListener('click', () => {
+      const v = prompt('Nom de la partition :', r.name);
+      if (v && v.trim()) { r.name = v.trim().slice(0, 60); saveProg(); openRec(id); }
+    });
+    stage.querySelector('[data-del]').addEventListener('click', () => {
+      if (!confirm('Supprimer cette partition ?')) return;
+      prog.recs = prog.recs.filter(x => x.id !== id);
+      saveProg();
+      renderPartition();
+    });
+  }
+
+  function escapeHTMLp(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // ================= JOUER =================
@@ -288,6 +563,12 @@
   function startSong(id) {
     const song = SONGS.find(s => s.id === id);
     if (!song) return;
+    startSongObj(song, renderJouer, () => startSong(id));
+  }
+
+  // Version générale : accepte n'importe quel objet {name, icon, notes[, id]}
+  // — y compris les partitions enregistrées par l'utilisateur.
+  function startSongObj(song, onBack, onAgain) {
     let i = 0;
     headSub.textContent = 'Mélodie guidée';
     const draw = () => {
@@ -306,8 +587,8 @@
             ${done ? `<button class="btn btn--small" data-again type="button">Rejouer</button>` : ''}
           </div>
         </div>`;
-      stage.querySelector('[data-quit]')?.addEventListener('click', () => { noteHandler = null; clearMarks(); renderJouer(); });
-      stage.querySelector('[data-again]')?.addEventListener('click', () => startSong(id));
+      stage.querySelector('[data-quit]')?.addEventListener('click', () => { noteHandler = null; clearMarks(); onBack(); });
+      stage.querySelector('[data-again]')?.addEventListener('click', () => (onAgain ? onAgain() : startSongObj(song, onBack, onAgain)));
       stage.querySelector('[data-hear]')?.addEventListener('click', () => {
         // fait entendre les 5 prochaines notes
         song.notes.slice(i, i + 5).forEach((m, k) => playNote(m, 0.6, 0.7, k * 0.45));
@@ -317,8 +598,7 @@
         ensureVisible(song.notes[i]);
         mark([song.notes[i]], 'hint');
       } else {
-        prog.songs[id] = true;
-        saveProg();
+        if (song.id) { prog.songs[song.id] = true; saveProg(); }
         noteHandler = null;
       }
     };
@@ -885,4 +1165,16 @@
   labelsBtnText();
   renderKeyboard();
   render();
+
+  // Portrait ↔ paysage : le clavier passe de 2 à 3 octaves.
+  let lastOrient = window.innerWidth > window.innerHeight;
+  function onResize() {
+    const nowLandscape = window.innerWidth > window.innerHeight;
+    if (nowLandscape === lastOrient && WHITE_PER_VIEW === whitesPerView()) return;
+    lastOrient = nowLandscape;
+    WHITE_PER_VIEW = whitesPerView();
+    renderKeyboard();
+  }
+  window.addEventListener('resize', onResize);
+  window.addEventListener('orientationchange', () => setTimeout(onResize, 120));
 })();

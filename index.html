@@ -25,10 +25,11 @@
       <p class="head__sub" id="headSub">L'atelier du clavier</p>
     </header>
 
-    <nav class="tabs" id="tabs">
+    <nav class="tabs tabs--5" id="tabs">
       <button class="tab tab--active" data-tab="jouer" type="button">Jouer</button>
       <button class="tab" data-tab="apprendre" type="button">Apprendre</button>
       <button class="tab" data-tab="entrainer" type="button">Entraîner</button>
+      <button class="tab" data-tab="partition" type="button">Partition</button>
       <button class="tab" data-tab="dico" type="button">Dico</button>
     </nav>
 
@@ -41,7 +42,9 @@
         <button class="kb-tool" id="octDown" type="button" aria-label="Octave grave">‹</button>
         <span class="kb-range" id="kbRange">Do3 – Si4</span>
         <button class="kb-tool" id="octUp" type="button" aria-label="Octave aiguë">›</button>
+        <span class="kb-live" id="kbLive" hidden></span>
         <span class="kb-spacer"></span>
+        <button class="kb-tool kb-tool--wide" id="listenBtn" type="button"><i class="dot"></i>Écoute</button>
         <button class="kb-tool kb-tool--wide" id="labelsBtn" type="button">Do Ré Mi</button>
       </div>
       <div class="kb" id="kb"></div>
