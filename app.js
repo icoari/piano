@@ -44,8 +44,8 @@
   const COF_PC = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5];
   const DEGREES = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
 
-  // Mélodies guidées — écrites en noms de notes pour rester lisibles.
-  // N('C4 F#4 Bb3 …') -> tableau MIDI (Do central = C4 = 60).
+  // Mélodies guidées — 4 œuvres classiques, COMPLÈTES. Écrites en noms de
+  // notes pour rester lisibles. N('C4 F#4 Bb3 …') -> tableau MIDI (C4 = 60).
   function N(str) {
     const L = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
     return str.trim().split(/\s+/).map(t => {
@@ -53,109 +53,52 @@
       return (Number(m[3]) + 1) * 12 + L[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
     });
   }
-  // beats (optionnel) : durée relative de chaque note (1 = noire) — utilisé
-  // pour que « Écouter » restitue le vrai rythme du morceau.
+  // beats : durée relative de chaque note (1 = noire) — « Écouter » restitue
+  // le vrai rythme. repeat: 2 = reprise écrite dans la partition.
+  const ELISE_RUN = 'E5 D#5 E5 D#5 E5 B4 D5 C5 A4';       // le motif que tout le monde connaît
+  const ELISE_A1 = ELISE_RUN + ' C4 E4 A4 B4 E4 G#4 B4 C5 E4';
+  const ELISE_A2 = ELISE_RUN + ' C4 E4 A4 B4 E4 C5 B4 A4';
+  const ELISE_B = 'B4 C5 D5 E5 G4 F5 E5 D5 F4 E5 D5 C5 E4 D5 C5 B4';
+  const BR = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1];  // rythme du motif
+  const BA1 = BR.concat([0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5]);
+  const BA2 = BR.concat([0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 2]);
+  const BB = [0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1];
+
+  const ODE_A = 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4';
+  const ODE_A2 = 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4';
+  const ODE_B = 'D4 D4 E4 C4 D4 E4 F4 E4 C4 D4 E4 F4 E4 D4 C4 D4 G3';
+  const OB = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2];
+  const OBB = [1, 1, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 1, 2];
+
   const SONGS = [
-    // --- Comptines ---
-    { id: 'lune', name: 'Au clair de la lune', icon: '🌙', level: 'Néophyte', cat: 'comptines',
-      // couplet complet : A A B A
-      notes: N(`C4 C4 C4 D4 E4 D4 C4 E4 D4 D4 C4
-                C4 C4 C4 D4 E4 D4 C4 E4 D4 D4 C4
-                D4 D4 D4 D4 A3 A3 D4 C4 B3 A3 G3
-                C4 C4 C4 D4 E4 D4 C4 E4 D4 D4 C4`),
-      beats: [1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 4, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 4, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 4, 1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 4] },
-    { id: 'jacques', name: 'Frère Jacques', icon: '🔔', level: 'Néophyte', cat: 'comptines',
-      notes: N('C4 D4 E4 C4 C4 D4 E4 C4 E4 F4 G4 E4 F4 G4 G4 A4 G4 F4 E4 C4 G4 A4 G4 F4 E4 C4 C4 G3 C4 C4 G3 C4'),
-      beats: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 0.5, 0.5, 0.5, 0.5, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1, 1, 2, 1, 1, 2] },
-    { id: 'twinkle', name: 'Ah ! vous dirai-je, maman', icon: '⭐', level: 'Néophyte', cat: 'comptines',
-      notes: N('C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4 G4 G4 F4 F4 E4 E4 D4 G4 G4 F4 F4 E4 E4 D4 C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4'),
-      beats: [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2] },
-    // --- Classique ---
-    { id: 'joie', name: 'Ode à la joie · Beethoven', icon: '🎼', level: 'Facile', cat: 'classique',
-      // thème complet : A A + pont + A final
-      notes: N(`E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4
-                E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4
-                D4 D4 E4 C4 D4 E4 F4 E4 C4 D4 E4 F4 E4 D4 C4 D4 G3
-                E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4`),
-      beats: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2,
-        1, 1, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 1, 2,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2] },
-    { id: 'symph5', name: '5ᵉ Symphonie · Beethoven', icon: '🎻', level: 'Facile', cat: 'classique',
-      notes: N('G4 G4 G4 Eb4 F4 F4 F4 D4 G4 G4 G4 Eb4 Ab4 Ab4 Ab4 G4 Eb5 Eb5 Eb5 C5'),
-      beats: [0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3, 0.5, 0.5, 0.5, 3] },
-    { id: 'elise', name: 'Lettre à Élise · Beethoven', icon: '🕯️', level: 'Moyen', cat: 'classique',
-      // section A complète : a a' + b + a''
-      notes: N(`E5 D#5 E5 D#5 E5 B4 D5 C5 A4 C4 E4 A4 B4 E4 G#4 B4 C5 E4
-                E5 D#5 E5 D#5 E5 B4 D5 C5 A4 C4 E4 A4 B4 E4 C5 B4 A4
-                B4 C5 D5 E5 G4 F5 E5 D5 F4 E5 D5 C5 E4 D5 C5 B4
-                E5 D#5 E5 D#5 E5 B4 D5 C5 A4 C4 E4 A4 B4 E4 C5 B4 A4`),
-      beats: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5,
-        0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 2,
-        0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1,
-        0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 2] },
-    { id: 'menuet', name: 'Menuet en sol · Bach', icon: '🎩', level: 'Moyen', cat: 'classique',
-      // première partie complète (16 mesures)
-      notes: N(`D5 G4 A4 B4 C5 D5 G4 G4 E5 C5 D5 E5 F#5 G5 G4 G4
-                C5 D5 C5 B4 A4 B4 C5 B4 A4 G4 F#4 G4 A4 B4 G4 A4
-                D5 G4 A4 B4 C5 D5 G4 G4 E5 C5 D5 E5 F#5 G5 G4 G4
-                C5 D5 C5 B4 A4 B4 C5 B4 A4 G4 A4 B4 A4 G4 F#4 G4`),
-      beats: [1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1,
-        1, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 3,
-        1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5, 1, 1, 1,
-        1, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 0.5, 3] },
-    { id: 'nachtmusik', name: 'Petite musique de nuit · Mozart', icon: '🌃', level: 'Moyen', cat: 'classique',
-      notes: N('G4 D4 G4 D4 G4 D4 G4 B4 D5 C5 A4 C5 A4 C5 A4 F#4 A4 D4'),
-      beats: [1.5, 0.5, 1.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2, 1.5, 0.5, 1.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2] },
-    { id: 'turque', name: 'Marche turque · Mozart', icon: '🏇', level: 'Difficile', cat: 'classique',
-      notes: N('B4 A4 G#4 A4 C5 D5 C5 B4 C5 E5 F5 E5 D#5 E5 B5 A5 G#5 A5 B5 A5 G#5 A5 C6'),
-      beats: [0.5, 0.5, 0.5, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2] },
-    { id: 'canon', name: 'Canon · Pachelbel', icon: '⛪', level: 'Facile', cat: 'classique',
-      notes: N('F#5 E5 D5 C#5 B4 A4 B4 C#5 D5 C#5 B4 A4 G4 F#4 G4 E4'), repeat: 2 },
-    { id: 'toccata', name: 'Toccata en ré mineur · Bach', icon: '⚡', level: 'Moyen', cat: 'classique',
-      notes: N('A5 G5 A5 G5 F5 E5 D5 C#5 D5 A4 G4 A4 E4 F4 C#4 D4'),
-      beats: [1, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 1, 2.5, 1, 0.5, 2, 0.5, 0.5, 1, 3] },
-    { id: 'dvorak', name: 'Symphonie du Nouveau Monde · Dvořák', icon: '🌍', level: 'Moyen', cat: 'classique',
-      notes: N('E4 G4 G4 E4 D4 C4 D4 E4 G4 E4 D4 E4 G4 G4 E4 D4 C4 D4 E4 D4 C4'),
-      beats: [1, 1, 1.5, 0.5, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1.5, 0.5, 1, 1, 1, 1, 1, 3], repeat: 2 },
-    { id: 'brahms', name: 'Berceuse · Brahms', icon: '😴', level: 'Moyen', cat: 'classique',
-      notes: N('E4 E4 G4 E4 E4 G4 E4 G4 C5 B4 A4 A4 G4 D4 E4 F4 D4 D4 E4 F4 D4 F4 B4 A4 G4 B4 C5'),
-      beats: [0.5, 0.5, 2, 0.5, 0.5, 2, 0.5, 0.5, 1, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 1, 1, 1, 1, 1, 2] },
-    { id: 'greensleeves', name: 'Greensleeves · Traditionnel', icon: '🍃', level: 'Moyen', cat: 'classique',
-      notes: N('A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 A4 A4 G#4 A4 B4 G#4 E4 A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 B4 A4 G#4 F#4 G#4 A4 A4') },
-    // --- Films ---
-    { id: 'starwars', name: 'Star Wars · J. Williams', icon: '⚔️', level: 'Moyen', cat: 'films',
-      notes: N('G4 G4 G4 C5 G5 F5 E5 D5 C6 G5 F5 E5 D5 C6 G5 F5 E5 F5 D5'),
-      beats: [0.5, 0.5, 0.5, 2, 2, 0.5, 0.5, 0.5, 2, 1, 0.5, 0.5, 0.5, 2, 1, 0.5, 0.5, 0.5, 2], repeat: 2 },
-    { id: 'potter', name: 'Harry Potter · J. Williams', icon: '🪄', level: 'Difficile', cat: 'films',
-      notes: N('B4 E5 G5 F#5 E5 B5 A5 F#5 E5 G5 F#5 D#5 F5 B4'),
-      beats: [1, 1.5, 0.5, 1, 2, 1, 3, 3, 1.5, 0.5, 1, 2, 1, 3], repeat: 2 },
-    { id: 'pirates', name: 'Pirates des Caraïbes', icon: '🏴‍☠️', level: 'Moyen', cat: 'films',
-      // le riff, deux passes (la 2ᵉ conclut sur do#-ré)
-      notes: N(`A4 C5 D5 D5 D5 E5 F5 F5 F5 G5 E5 E5 D5 C5 C5 D5
-                A4 C5 D5 D5 D5 E5 F5 F5 F5 G5 E5 E5 D5 C#5 D5 D5`),
-      beats: [0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 2,
-        0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 3] },
-    { id: 'panther', name: 'La Panthère rose · Mancini', icon: '🐾', level: 'Difficile', cat: 'films',
-      notes: N('D#4 E4 F#4 G4 D#4 E4 F#4 G4 C5 B4 E4 G4 B4 Bb4 A4 G4 E4 D4 E4'),
-      beats: [0.5, 2, 0.5, 2, 0.5, 0.5, 0.5, 0.5, 1.5, 1.5, 0.5, 0.5, 0.5, 1.5, 1, 1, 1, 1, 3], repeat: 2 },
-    // --- Chansons & fêtes ---
-    { id: 'birthday', name: 'Joyeux anniversaire', icon: '🎂', level: 'Facile', cat: 'chansons',
-      notes: N('G3 G3 A3 G3 C4 B3 G3 G3 A3 G3 D4 C4 G3 G3 G4 E4 C4 B3 A3 F4 F4 E4 C4 D4 C4'),
-      beats: [0.5, 0.5, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 1, 1, 2, 0.5, 0.5, 1, 1, 1, 3] },
-    { id: 'jingle', name: 'Vive le vent', icon: '🎄', level: 'Facile', cat: 'chansons',
-      // refrain complet
-      notes: N(`E4 E4 E4 E4 E4 E4 E4 G4 C4 D4 E4 F4 F4 F4 F4 F4 E4 E4 E4 E4 D4 D4 E4 D4 G4
-                E4 E4 E4 E4 E4 E4 E4 G4 C4 D4 E4 F4 F4 F4 F4 F4 E4 E4 E4 G4 G4 F4 D4 C4`),
-      beats: [0.5, 0.5, 1, 0.5, 0.5, 1, 0.5, 0.5, 0.75, 0.25, 2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2,
-        0.5, 0.5, 1, 0.5, 0.5, 1, 0.5, 0.5, 0.75, 0.25, 2, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2] },
-    { id: 'nuit', name: 'Douce nuit', icon: '✨', level: 'Moyen', cat: 'chansons',
-      notes: N('G4 A4 G4 E4 G4 A4 G4 E4 D5 D5 B4 C5 C5 G4 A4 A4 C5 B4 A4 G4 A4 G4 E4 A4 A4 C5 B4 A4 G4 A4 G4 E4 D5 D5 F5 D5 B4 C5 E5 C5 G4 E4 G4 F4 D4 C4'),
-      beats: [1.5, 0.5, 1, 3, 1.5, 0.5, 1, 3, 2, 1, 3, 2, 1, 3, 2, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 3, 2, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 3, 2, 1, 1.5, 0.5, 1, 3, 3, 1, 1, 1, 1.5, 0.5, 1, 4] },
-    { id: 'saints', name: 'When the Saints', icon: '🎺', level: 'Facile', cat: 'chansons',
-      notes: N('C4 E4 F4 G4 C4 E4 F4 G4 C4 E4 F4 G4 E4 C4 E4 D4 E4 D4 C4 C4 E4 G4 G4 G4 F4 E4 F4 G4 E4 C4 D4 C4') },
+    { id: 'elise', name: 'Lettre à Élise · Beethoven', icon: '🕯️', level: 'Moyen',
+      // La section célèbre EN ENTIER, avec ses reprises telles qu'écrites :
+      // thème · reprise · passage central · thème · passage central · thème.
+      notes: N([ELISE_A1, ELISE_A2, ELISE_B, ELISE_A2, ELISE_B, ELISE_A2].join(' ')),
+      beats: [].concat(BA1, BA2, BB, BA2, BB, BA2.slice(0, -1), [3]) },
+    { id: 'joie', name: 'Ode à la joie · Beethoven', icon: '🎼', level: 'Facile',
+      // Le thème de la 9ᵉ complet : couplet ×2, pont, retour, pont, final.
+      notes: N([ODE_A, ODE_A2, ODE_B, ODE_A2, ODE_B, ODE_A2].join(' ')),
+      beats: [].concat(OB, OB, OBB, OB, OBB, OB.slice(0, -1), [3]) },
+    { id: 'twinkle', name: 'Ah ! vous dirai-je, maman · Mozart', icon: '⭐', level: 'Néophyte',
+      // Le thème complet des 12 Variations de Mozart (A B A).
+      notes: N(`C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4
+                G4 G4 F4 F4 E4 E4 D4 G4 G4 F4 F4 E4 E4 D4
+                C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4`),
+      beats: [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 3] },
+    { id: 'greensleeves', name: 'Greensleeves · Traditionnel', icon: '🍃', level: 'Moyen',
+      // La complainte entière (deux couplets, comme elle se joue).
+      notes: N(`A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 A4 A4 G#4 A4 B4 G#4 E4
+                A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 B4 A4 G#4 F#4 G#4 A4 A4`),
+      beats: [1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 2, 1, 3,
+        1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 2, 3],
+      repeat: 2 },
+    // Réservée à la leçon 4 (pas listée dans Musiques)
+    { id: 'lune', name: 'Au clair de la lune', icon: '🌙', level: 'Néophyte', hidden: true,
+      notes: N('C4 C4 C4 D4 E4 D4 C4 E4 D4 D4 C4'),
+      beats: [1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 4] },
   ];
-  // repeat: 2 = le thème se rejoue tel quel dans l'œuvre (reprise réelle)
+  // repeat: 2 = reprise réelle écrite dans la partition
   SONGS.forEach(s => {
     if (s.repeat) {
       s.notes = Array.from({ length: s.repeat }, () => s.notes).flat();
@@ -163,19 +106,13 @@
     }
   });
   // Tempo (secondes par temps) — chaque œuvre respire à sa vitesse.
-  const TEMPO = {
-    lune: 0.55, jacques: 0.5, twinkle: 0.5, joie: 0.55, symph5: 0.5, elise: 0.4,
-    menuet: 0.45, nachtmusik: 0.45, turque: 0.32, canon: 0.75, toccata: 0.55,
-    dvorak: 0.6, brahms: 0.65, greensleeves: 0.55, starwars: 0.45, potter: 0.5,
-    pirates: 0.35, panther: 0.55, birthday: 0.55, jingle: 0.4, nuit: 0.65, saints: 0.45,
-  };
+  const TEMPO = { elise: 0.5, joie: 0.55, twinkle: 0.5, greensleeves: 0.5, lune: 0.55 };
   SONGS.forEach(s => { s.tempo = TEMPO[s.id] || 0.45; });
   function songDur(s) {
     const beats = s.beats ? s.beats.reduce((a, b) => a + b, 0) : s.notes.length;
     const sec = Math.round(beats * s.tempo);
     return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
   }
-  const SONG_CATS = [['tout', 'Tout'], ['classique', 'Classique'], ['films', 'Films'], ['comptines', 'Comptines'], ['chansons', 'Chansons']];
 
   // ---------- Progression ----------
   function loadProg() {
@@ -378,7 +315,7 @@
       const bpc = pc + 1;
       if (!BLACK.has(bpc % 12)) return;
       const bm = m + 1;
-      const bw = 127.5 / wCount;   // ≡ 8.5% quand 15 blanches sont visibles
+      const bw = 79 / wCount;   // noire ≈ 0,79 blanche — proportions réalistes, restant tapable
       const left = ((i + 1) / wCount * 100) - bw / 2;
       const extra = shown.get(bm) ? ` bkey--${shown.get(bm)}` : '';
       html += `<button class="bkey${extra}" style="left:${left}%;width:${bw}%" data-midi="${bm}" type="button" aria-label="${noteName(bm)}">
@@ -697,19 +634,16 @@
   }
 
   // ================= MUSIQUES =================
-  let jouerCat = 'tout';
   const LVL_ORDER = { 'Néophyte': 0, 'Facile': 1, 'Moyen': 2, 'Difficile': 3 };
   function lvlDots(level) {
     const n = (LVL_ORDER[level] ?? 1) + 1;
     return '●'.repeat(n) + '○'.repeat(4 - n);
   }
   function renderJouer() {
-    const doneCount = SONGS.filter(s => prog.songs[s.id]).length;
-    headSub.textContent = doneCount ? `${doneCount} / ${SONGS.length} musiques jouées` : 'La touche s\'illumine, tu joues';
-    const list = (jouerCat === 'tout' ? SONGS : SONGS.filter(s => s.cat === jouerCat))
+    const list = SONGS.filter(s => !s.hidden)
       .slice().sort((a, b) => (LVL_ORDER[a.level] - LVL_ORDER[b.level]) || a.name.localeCompare(b.name, 'fr'));
-    const chips = SONG_CATS.map(([k, lbl]) =>
-      `<button class="chip ${k === jouerCat ? 'chip--on' : ''}" data-cat="${k}" type="button">${lbl}</button>`).join('');
+    const doneCount = list.filter(s => prog.songs[s.id]).length;
+    headSub.textContent = doneCount ? `${doneCount} / ${list.length} œuvres jouées` : 'Quatre œuvres, en entier';
     const cards = list.map(s => {
       const [title, author] = s.name.split(' · ');
       return `
@@ -717,14 +651,12 @@
         <span class="songcard__icon">${s.icon}</span>
         <span class="songcard__name">${title}</span>
         <span class="songcard__author">${author || '&nbsp;'}</span>
-        <span class="songcard__meta"><span class="songcard__lvl" title="${s.level}">${lvlDots(s.level)}</span><span>${songDur(s)}</span>${prog.songs[s.id] ? '<span class="songcard__done">✓</span>' : ''}</span>
+        <span class="songcard__meta"><span class="songcard__lvl" title="${s.level}">${lvlDots(s.level)}</span><span>${s.notes.length} notes · ${songDur(s)}</span>${prog.songs[s.id] ? '<span class="songcard__done">✓</span>' : ''}</span>
       </button>`;
     }).join('');
     stage.innerHTML = `
-      <div class="chips">${chips}</div>
       <div class="songgrid">${cards}</div>
       <p class="freeplay-hint">…ou joue librement, chaque touche sonne.</p>`;
-    stage.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => { jouerCat = b.dataset.cat; renderJouer(); }));
     stage.querySelectorAll('[data-song]').forEach(b => b.addEventListener('click', () => startSong(b.dataset.song)));
   }
 

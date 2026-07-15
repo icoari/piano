@@ -593,3 +593,9 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
   -webkit-tap-highlight-color: transparent;
 }
 .seg__btn--on { color: var(--accent); border-color: var(--accent-glow); background: var(--accent-soft); }
+
+/* Téléphone étroit : le sous-titre passe sous le titre, les boutons respirent */
+@media (max-width: 430px) {
+  .hero { flex-wrap: wrap; }
+  .hero__sub { order: 10; flex-basis: 100%; align-self: auto; margin: 0 0 2px; }
+}
