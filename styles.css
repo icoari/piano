@@ -47,10 +47,76 @@ body {
 }
 .app { max-width: 760px; margin: 0 auto; }
 
-/* ---------- Tête ---------- */
-.head { margin-bottom: 14px; padding: 4px 6px 0; }
-.head__title { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
-.head__sub { font-size: 12.5px; color: var(--text-dim); margin-top: 3px; }
+/* ---------- Héro : titre + Écoute + Enregistrer, toujours visibles ---------- */
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 2px 2px 0;
+  min-height: 44px;
+}
+.hero__title { font-size: 23px; font-weight: 700; letter-spacing: -0.02em; }
+.hero__sub {
+  font-size: 11.5px; color: var(--text-dim);
+  align-self: flex-end; margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.hero__spacer { flex: 1; }
+.hero-btn {
+  height: 38px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 700;
+  border-radius: 19px;
+  border: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+  transition: transform 120ms var(--ease), box-shadow 200ms var(--ease);
+}
+.hero-btn:active { transform: scale(0.95); }
+.hero-btn--listen {
+  padding: 0 16px;
+  background: var(--accent);
+  color: #171207;
+}
+.hero-btn--listen .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: rgba(23, 18, 7, 0.45);
+}
+.hero-btn--listen.hero-btn--on {
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 4px 18px var(--accent-glow);
+}
+.hero-btn--on .dot {
+  background: #171207;
+  animation: listenPulse2 1.4s ease-in-out infinite;
+}
+@keyframes listenPulse2 {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(23, 18, 7, 0.4); }
+  55% { box-shadow: 0 0 0 5px rgba(23, 18, 7, 0); }
+}
+.hero-btn--rec {
+  width: 38px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.rec-ic {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #E26D5C;
+  display: block;
+  transition: border-radius 200ms var(--ease);
+}
+.hero-btn--recording {
+  border-color: rgba(226, 109, 92, 0.6);
+  background: var(--bad-soft);
+  animation: recRing 1.3s ease-in-out infinite;
+}
+.hero-btn--recording .rec-ic { border-radius: 3px; }
+@keyframes recRing {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(226, 109, 92, 0.45); }
+  55% { box-shadow: 0 0 0 6px rgba(226, 109, 92, 0); }
+}
 
 /* ---------- Onglets ---------- */
 .tabs {
@@ -81,10 +147,10 @@ body {
 /* ---------- Scène ---------- */
 .stage { min-height: 168px; margin-bottom: 14px; }
 
-/* Cartes génériques */
+/* Cartes génériques — bordure discrète, l'espace fait le travail */
 .card {
   background: var(--surface);
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 16px;
 }
@@ -396,21 +462,7 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
   .games { grid-template-columns: 1fr 1fr; }
 }
 
-/* ---------- Onglets ×5 ---------- */
-.tabs--5 { grid-template-columns: repeat(5, 1fr); gap: 3px; }
-.tabs--5 .tab { font-size: 11.5px; padding: 9px 2px; letter-spacing: -0.01em; }
-
-/* ---------- Écoute (micro) ---------- */
-.kb-tool--wide .dot {
-  display: inline-block;
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--text-faint);
-  margin-right: 6px;
-  vertical-align: 1px;
-}
-.kb-tool--listen { color: #E26D5C; border-color: rgba(226, 109, 92, 0.5); }
-.kb-tool--listen .dot { background: #E26D5C; animation: listenPulse 1.4s ease-in-out infinite; }
+/* ---------- Écoute : note détectée en direct ---------- */
 @keyframes listenPulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(226, 109, 92, 0.55); }
   55% { box-shadow: 0 0 0 6px rgba(226, 109, 92, 0); }
@@ -457,11 +509,12 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 @media (orientation: landscape) and (max-height: 520px) {
   body { padding: 8px 14px 10px; padding-left: max(14px, env(safe-area-inset-left)); padding-right: max(14px, env(safe-area-inset-right)); }
   .app { max-width: none; }
-  .head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; padding: 0 4px; }
-  .head__title { font-size: 18px; }
-  .head__sub { margin-top: 0; font-size: 11px; }
+  .hero { margin-bottom: 8px; min-height: 34px; }
+  .hero__title { font-size: 17px; }
+  .hero-btn { height: 32px; border-radius: 16px; font-size: 11.5px; }
+  .hero-btn--rec { width: 32px; }
   .tabs { margin-bottom: 8px; padding: 3px; }
-  .tabs--5 .tab { padding: 5px 2px; }
+  .tab { padding: 5px 2px; font-size: 12px; }
   .stage { min-height: 0; margin-bottom: 8px; }
   .stage .card { padding: 10px 14px; }
   .kb-wrap { padding: 6px 8px 8px; }
@@ -471,3 +524,72 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 }
 
 .songcount { font-size: 11px; font-weight: 600; color: var(--text-dim); background: var(--surface-hover); border-radius: 7px; padding: 2px 7px; margin-left: 6px; vertical-align: 1px; }
+
+/* ---------- Musiques : chips + grille ---------- */
+.chips {
+  display: flex; gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 2px 4px;
+  margin-bottom: 10px;
+}
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.chip--on { background: var(--accent); border-color: transparent; color: #171207; }
+
+.songgrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 9px;
+}
+.songcard {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  min-height: 104px;
+  text-align: left;
+  font-family: inherit; color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 13px 13px 11px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.songcard:active { transform: scale(0.97); }
+.songcard__icon { font-size: 21px; margin-bottom: 3px; }
+.songcard__name { font-size: 13px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; }
+.songcard__author { font-size: 11px; color: var(--text-dim); }
+.songcard__meta {
+  margin-top: auto; padding-top: 7px;
+  display: flex; align-items: center; gap: 7px;
+  font-size: 10.5px; color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.songcard__lvl { color: var(--accent); font-size: 8px; letter-spacing: 1.5px; }
+.songcard__done { color: var(--good); font-weight: 700; }
+.songcard--done { border-color: rgba(111, 191, 143, 0.3); }
+
+/* ---------- Studio : sélecteur Entraîner / Dico ---------- */
+.seg { display: flex; gap: 6px; margin-bottom: 12px; }
+.seg__btn {
+  flex: 1;
+  font-family: inherit; font-size: 12.5px; font-weight: 600;
+  padding: 8px;
+  border-radius: 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.seg__btn--on { color: var(--accent); border-color: var(--accent-glow); background: var(--accent-soft); }

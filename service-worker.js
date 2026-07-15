@@ -1,4 +1,4 @@
-const CACHE = 'piano-v3';
+const CACHE = 'piano-v4';
 const ASSETS = [
   './',
   './index.html',

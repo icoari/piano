@@ -20,17 +20,20 @@
 </head>
 <body>
   <main class="app">
-    <header class="head">
-      <h1 class="head__title">Piano</h1>
-      <p class="head__sub" id="headSub">L'atelier du clavier</p>
+    <header class="hero">
+      <h1 class="hero__title">Piano</h1>
+      <p class="hero__sub" id="headSub">L'atelier du clavier</p>
+      <span class="hero__spacer"></span>
+      <span class="kb-live" id="kbLive" hidden></span>
+      <button class="hero-btn hero-btn--rec" id="recBtn" type="button" aria-label="Enregistrer une partition"><i class="rec-ic"></i></button>
+      <button class="hero-btn hero-btn--listen" id="listenBtn" type="button"><i class="dot"></i>Écoute</button>
     </header>
 
-    <nav class="tabs tabs--5" id="tabs">
-      <button class="tab tab--active" data-tab="jouer" type="button">Jouer</button>
+    <nav class="tabs" id="tabs">
+      <button class="tab tab--active" data-tab="jouer" type="button">Musiques</button>
       <button class="tab" data-tab="apprendre" type="button">Apprendre</button>
-      <button class="tab" data-tab="entrainer" type="button">Entraîner</button>
-      <button class="tab" data-tab="partition" type="button">Partition</button>
-      <button class="tab" data-tab="dico" type="button">Dico</button>
+      <button class="tab" data-tab="studio" type="button">Studio</button>
+      <button class="tab" data-tab="partition" type="button">Partitions</button>
     </nav>
 
     <!-- Zone de contenu du mode actif (au-dessus du clavier) -->
@@ -42,9 +45,7 @@
         <button class="kb-tool" id="octDown" type="button" aria-label="Octave grave">‹</button>
         <span class="kb-range" id="kbRange">Do3 – Si4</span>
         <button class="kb-tool" id="octUp" type="button" aria-label="Octave aiguë">›</button>
-        <span class="kb-live" id="kbLive" hidden></span>
         <span class="kb-spacer"></span>
-        <button class="kb-tool kb-tool--wide" id="listenBtn" type="button"><i class="dot"></i>Écoute</button>
         <button class="kb-tool kb-tool--wide" id="labelsBtn" type="button">Do Ré Mi</button>
       </div>
       <div class="kb" id="kb"></div>
