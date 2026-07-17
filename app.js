@@ -1,51 +1,21 @@
-// Piano — l'atelier du clavier. App autonome, hors-ligne, sans le moindre
-// sample audio : le son est synthétisé en Web Audio (partiels harmoniques +
-// enveloppe percussive), donc l'app pèse trois fois rien et joue en avion.
-//
-//   Jouer      — clavier libre + mélodies guidées note à note
-//   Apprendre  — parcours progressif (néophyte → confirmé), leçons interactives
-//   Entraîner  — trouve la note, quiz d'accords, oreille (intervalle)
-//   Dico       — accords & gammes dans toutes les tonalités + cycle des quintes
-(() => {
+// Piano v2 — le compagnon du vrai piano.
+// Deux fonctions : ÉCOUTER quelqu'un jouer et écrire la partition (silences
+// compris), et JOUER une partition en rythme sur un vrai piano, validé au
+// micro. Tout tourne en local, hors connexion.
+(function () {
   'use strict';
 
-  const PROG_KEY = 'piano-progress-v1';
-
-  // ---------- Théorie ----------
+  // ---------- Utilitaires ----------
+  const $ = (id) => document.getElementById(id);
+  const stage = $('stage');
+  const headSub = $('headSub');
+  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const FR = ['Do', 'Do♯', 'Ré', 'Ré♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
-  const EN = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
   const BLACK = new Set([1, 3, 6, 8, 10]);
-
-  const CHORDS = {
-    'Majeur':   { iv: [0, 4, 7],      suffix: '' },
-    'Mineur':   { iv: [0, 3, 7],      suffix: 'm' },
-    '7':        { iv: [0, 4, 7, 10],  suffix: '7' },
-    'Maj7':     { iv: [0, 4, 7, 11],  suffix: 'maj7' },
-    'Min7':     { iv: [0, 3, 7, 10],  suffix: 'm7' },
-    'Dim':      { iv: [0, 3, 6],      suffix: 'dim' },
-    'Aug':      { iv: [0, 4, 8],      suffix: 'aug' },
-    'Sus2':     { iv: [0, 2, 7],      suffix: 'sus2' },
-    'Sus4':     { iv: [0, 5, 7],      suffix: 'sus4' },
-  };
-  const SCALES = {
-    'Majeure':            { iv: [0, 2, 4, 5, 7, 9, 11], hint: 'La gamme de référence — joyeuse, stable.' },
-    'Mineure naturelle':  { iv: [0, 2, 3, 5, 7, 8, 10], hint: 'La couleur mélancolique.' },
-    'Mineure harmonique': { iv: [0, 2, 3, 5, 7, 8, 11], hint: 'Le 7ᵉ degré remonté — parfum oriental.' },
-    'Penta majeure':      { iv: [0, 2, 4, 7, 9],        hint: '5 notes, zéro fausse note — idéale pour improviser.' },
-    'Penta mineure':      { iv: [0, 3, 5, 7, 10],       hint: 'La gamme du rock et du blues.' },
-    'Blues':              { iv: [0, 3, 5, 6, 7, 10],    hint: 'La penta mineure + la blue note.' },
-  };
-  // Cycle des quintes (majeures, relatives mineures, armure)
-  const COF = [
-    ['C', 'Am', '—'], ['G', 'Em', '1♯'], ['D', 'Bm', '2♯'], ['A', 'F♯m', '3♯'],
-    ['E', 'C♯m', '4♯'], ['B', 'G♯m', '5♯'], ['F♯', 'D♯m', '6♯'], ['D♭', 'B♭m', '5♭'],
-    ['A♭', 'Fm', '4♭'], ['E♭', 'Cm', '3♭'], ['B♭', 'Gm', '2♭'], ['F', 'Dm', '1♭'],
-  ];
-  const COF_PC = [0, 7, 2, 9, 4, 11, 6, 1, 8, 3, 10, 5];
-  const DEGREES = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
-
-  // Mélodies guidées — 4 œuvres classiques, COMPLÈTES. Écrites en noms de
-  // notes pour rester lisibles. N('C4 F#4 Bb3 …') -> tableau MIDI (C4 = 60).
+  function noteName(midi, withOct = true) {
+    const oct = Math.floor(midi / 12) - 1;
+    return FR[midi % 12] + (withOct ? oct : '');
+  }
   function N(str) {
     const L = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
     return str.trim().split(/\s+/).map(t => {
@@ -53,88 +23,38 @@
       return (Number(m[3]) + 1) * 12 + L[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
     });
   }
-  // beats : durée relative de chaque note (1 = noire) — « Écouter » restitue
-  // le vrai rythme. repeat: 2 = reprise écrite dans la partition.
-  const ELISE_RUN = 'E5 D#5 E5 D#5 E5 B4 D5 C5 A4';       // le motif que tout le monde connaît
-  const ELISE_A1 = ELISE_RUN + ' C4 E4 A4 B4 E4 G#4 B4 C5 E4';
-  const ELISE_A2 = ELISE_RUN + ' C4 E4 A4 B4 E4 C5 B4 A4';
-  const ELISE_B = 'B4 C5 D5 E5 G4 F5 E5 D5 F4 E5 D5 C5 E4 D5 C5 B4';
-  const BR = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1];  // rythme du motif
-  const BA1 = BR.concat([0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5]);
-  const BA2 = BR.concat([0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 2]);
-  const BB = [0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1];
 
-  const ODE_A = 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4';
-  const ODE_A2 = 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4';
-  const ODE_B = 'D4 D4 E4 C4 D4 E4 F4 E4 C4 D4 E4 F4 E4 D4 C4 D4 G3';
-  const OB = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2];
-  const OBB = [1, 1, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 1, 2];
-
-  const SONGS = [
-    { id: 'elise', name: 'Lettre à Élise · Beethoven', icon: '🕯️', level: 'Moyen',
-      // La section célèbre EN ENTIER, avec ses reprises telles qu'écrites :
-      // thème · reprise · passage central · thème · passage central · thème.
-      notes: N([ELISE_A1, ELISE_A2, ELISE_B, ELISE_A2, ELISE_B, ELISE_A2].join(' ')),
-      beats: [].concat(BA1, BA2, BB, BA2, BB, BA2.slice(0, -1), [3]) },
-    { id: 'joie', name: 'Ode à la joie · Beethoven', icon: '🎼', level: 'Facile',
-      // Le thème de la 9ᵉ complet : couplet ×2, pont, retour, pont, final.
-      notes: N([ODE_A, ODE_A2, ODE_B, ODE_A2, ODE_B, ODE_A2].join(' ')),
-      beats: [].concat(OB, OB, OBB, OB, OBB, OB.slice(0, -1), [3]) },
-    { id: 'twinkle', name: 'Ah ! vous dirai-je, maman · Mozart', icon: '⭐', level: 'Néophyte',
-      // Le thème complet des 12 Variations de Mozart (A B A).
-      notes: N(`C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4
-                G4 G4 F4 F4 E4 E4 D4 G4 G4 F4 F4 E4 E4 D4
-                C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4`),
-      beats: [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 3] },
-    { id: 'greensleeves', name: 'Greensleeves · Traditionnel', icon: '🍃', level: 'Moyen',
-      // La complainte entière (deux couplets, comme elle se joue).
-      notes: N(`A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 A4 A4 G#4 A4 B4 G#4 E4
-                A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 B4 A4 G#4 F#4 G#4 A4 A4`),
-      beats: [1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 2, 1, 3,
-        1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 2, 3],
-      repeat: 2 },
-    // Réservée à la leçon 4 (pas listée dans Musiques)
-    { id: 'lune', name: 'Au clair de la lune', icon: '🌙', level: 'Néophyte', hidden: true,
-      notes: N('C4 C4 C4 D4 E4 D4 C4 E4 D4 D4 C4'),
-      beats: [1, 1, 1, 1, 2, 2, 1, 1, 1, 1, 4] },
-  ];
-  // repeat: 2 = reprise réelle écrite dans la partition
-  SONGS.forEach(s => {
-    if (s.repeat) {
-      s.notes = Array.from({ length: s.repeat }, () => s.notes).flat();
-      if (s.beats) s.beats = Array.from({ length: s.repeat }, () => s.beats).flat();
-    }
-  });
-  // Tempo (secondes par temps) — chaque œuvre respire à sa vitesse.
-  const TEMPO = { elise: 0.5, joie: 0.55, twinkle: 0.5, greensleeves: 0.5, lune: 0.55 };
-  SONGS.forEach(s => { s.tempo = TEMPO[s.id] || 0.45; });
-  function songDur(s) {
-    const beats = s.beats ? s.beats.reduce((a, b) => a + b, 0) : s.notes.length;
-    const sec = Math.round(beats * s.tempo);
-    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
-  }
-
-  // ---------- Progression ----------
-  function loadProg() {
+  // ---------- Stockage (+ migration depuis la v1) ----------
+  const KEY = 'piano-v2-data';
+  function load() {
     try {
-      const p = JSON.parse(localStorage.getItem(PROG_KEY) || 'null') || {};
-      if (!p.lessons) p.lessons = {};
-      if (!p.songs) p.songs = {};
-      if (!p.best) p.best = {};
-      if (!p.labels) p.labels = 'fr';
-      return p;
-    } catch { return { lessons: {}, songs: {}, best: {}, labels: 'fr' }; }
+      const d = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (d) return d;
+    } catch {}
+    const d = { scores: [], best: {}, settings: { metro: true } };
+    // Migration : les enregistrements de l'ancienne version (notes en ms)
+    try {
+      const v1 = JSON.parse(localStorage.getItem('piano-progress-v1') || 'null');
+      if (v1 && Array.isArray(v1.recs)) {
+        v1.recs.forEach(r => {
+          const ev = (r.notes || []).map((n, i, a) => ({
+            m: n.m, t0: n.t / 1000,
+            t1: (a[i + 1] ? Math.min(n.t / 1000 + 0.6, a[i + 1].t / 1000) : n.t / 1000 + 0.5),
+          }));
+          if (ev.length) d.scores.push(quantize(ev, r.name, r.date));
+        });
+      }
+    } catch {}
+    return d;
   }
-  const prog = loadProg();
-  function saveProg() { try { localStorage.setItem(PROG_KEY, JSON.stringify(prog)); } catch {} }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {} }
 
-  // ---------- Son (Web Audio, zéro sample) ----------
+  // ---------- Synthé (lecture des partitions + métronome) ----------
   let actx = null, master = null;
   function audio() {
     if (!actx) {
       actx = new (window.AudioContext || window.webkitAudioContext)();
       const comp = actx.createDynamicsCompressor();
-      comp.threshold.value = -18; comp.ratio.value = 6;
       master = actx.createGain();
       master.gain.value = 0.9;
       master.connect(comp);
@@ -143,17 +63,15 @@
     if (actx.state === 'suspended') actx.resume();
     return actx;
   }
-  const midiFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
-  function playNote(midi, dur = 1.4, vel = 0.85, when = 0) {
+  function playNote(midi, dur = 1.0, vel = 0.85, when = 0) {
     const ctx = audio();
     const t = ctx.currentTime + when;
-    const f = midiFreq(midi);
+    const f = 440 * Math.pow(2, (midi - 69) / 12);
     const g = ctx.createGain();
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = Math.min(9000, f * 7);
+    lp.frequency.value = Math.min(9000, f * 9);
     g.connect(lp); lp.connect(master);
-    // Partiels façon piano : fondamentale triangle + harmoniques sinus.
     const partials = [[1, 1, 'triangle'], [2, 0.32, 'sine'], [3, 0.14, 'sine'], [4.02, 0.06, 'sine'], [5, 0.035, 'sine']];
     for (const [mult, amp, type] of partials) {
       const o = ctx.createOscillator();
@@ -164,1134 +82,734 @@
       o.connect(og); og.connect(g);
       o.start(t); o.stop(t + dur + 0.15);
     }
-    // Enveloppe percussive : attaque 6 ms, décroissance exponentielle.
     const peak = vel * 0.42 * (midi < 55 ? 1.15 : midi > 76 ? 0.8 : 1);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(peak, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   }
-  function playChordNotes(midis, arp = 0.03) {
-    midis.forEach((m, i) => playNote(m, 1.6, 0.8, i * arp));
+  function click(accent, when = 0) {
+    const ctx = audio();
+    const t = ctx.currentTime + when;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'square';
+    o.frequency.value = accent ? 1980 : 1320;
+    g.gain.setValueAtTime(accent ? 0.22 : 0.13, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    o.connect(g); g.connect(master);
+    o.start(t); o.stop(t + 0.06);
   }
 
-  // ---------- Écoute (détection de hauteur au micro) ----------
-  // Pose le téléphone sur le vrai piano : l'app entend la note jouée et la
-  // fait suivre dans le même canal que le toucher. Autocorrélation (ACF2+)
-  // + stabilisation sur 2 trames + porte d'amplitude. Monophonique : parfait
-  // pour les mélodies et les leçons note à note (les accords se valident en
-  // arpège, note après note).
-  let micStream = null, micAnalyser = null, micTimer = null;
-  let listenOn = false;
-  let candMidi = null, candCount = 0, lastEmitted = null, silentFrames = 0;
-
-  function autoCorrelate(buf, sampleRate) {
-    let SIZE = buf.length;
-    let rms = 0;
-    for (let i = 0; i < SIZE; i++) { const v = buf[i]; rms += v * v; }
-    rms = Math.sqrt(rms / SIZE);
-    if (rms < 0.012) return -1;                      // trop faible → silence
-    let r1 = 0, r2 = SIZE - 1;
-    const thres = 0.2;
-    for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < thres) { r1 = i; break; }
-    for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
-    buf = buf.slice(r1, r2);
-    SIZE = buf.length;
-    if (SIZE < 32) return -1;
-    const c = new Float32Array(SIZE);
-    for (let i = 0; i < SIZE; i++)
-      for (let j = 0; j < SIZE - i; j++)
-        c[i] += buf[j] * buf[j + i];
-    let d = 0;
-    while (d < SIZE - 1 && c[d] > c[d + 1]) d++;
-    let maxval = -1, maxpos = -1;
-    for (let i = d; i < SIZE; i++) if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
-    if (maxpos <= 0) return -1;
-    let T0 = maxpos;
-    const x1 = c[T0 - 1] || 0, x2 = c[T0], x3 = c[T0 + 1] || 0;
-    const a = (x1 + x3 - 2 * x2) / 2, b = (x3 - x1) / 2;
-    if (a) T0 = T0 - b / (2 * a);
-    return sampleRate / T0;
-  }
-
-  const liveEl = document.getElementById('kbLive');
-  function micTick() {
-    const buf = new Float32Array(micAnalyser.fftSize);
-    micAnalyser.getFloatTimeDomainData(buf);
-    const freq = autoCorrelate(buf, actx.sampleRate);
-    if (freq < 26 || freq > 4500) {                  // hors du piano → silence
-      silentFrames++;
-      if (silentFrames >= 3) { lastEmitted = null; candMidi = null; candCount = 0; if (liveEl) liveEl.textContent = '· · ·'; }
-      return;
-    }
-    silentFrames = 0;
-    const midi = Math.round(69 + 12 * Math.log2(freq / 440));
-    if (midi < 21 || midi > 108) return;
-    if (midi === candMidi) candCount++;
-    else { candMidi = midi; candCount = 1; }
-    if (liveEl) liveEl.textContent = noteName(midi);
-    // 2 trames stables (~130 ms) et pas de re-déclenchement de la même note
-    // tant qu'elle n'a pas été relâchée (silence) ou remplacée.
-    if (candCount >= 2 && midi !== lastEmitted) {
-      lastEmitted = midi;
-      micNote(midi);
-    }
-  }
-
-  async function startListening() {
-    audio();
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    });
-    const src = actx.createMediaStreamSource(micStream);
-    micAnalyser = actx.createAnalyser();
-    micAnalyser.fftSize = 2048;
-    src.connect(micAnalyser);
-    candMidi = null; candCount = 0; lastEmitted = null; silentFrames = 0;
-    micTimer = setInterval(micTick, 66);
-    listenOn = true;
-    if (liveEl) { liveEl.hidden = false; liveEl.textContent = '· · ·'; }
-    document.getElementById('listenBtn').classList.add('hero-btn--on');
-  }
-  function stopListening() {
-    clearInterval(micTimer); micTimer = null;
-    try { micStream?.getTracks().forEach(t => t.stop()); } catch {}
-    micStream = null; micAnalyser = null; listenOn = false;
-    if (liveEl) liveEl.hidden = true;
-    document.getElementById('listenBtn').classList.remove('hero-btn--on');
-  }
-  document.getElementById('listenBtn').addEventListener('click', async () => {
-    if (listenOn) { stopListening(); return; }
-    try { await startListening(); }
-    catch { if (liveEl) { liveEl.hidden = false; liveEl.textContent = 'micro refusé'; setTimeout(() => { liveEl.hidden = true; }, 2500); } }
-  });
-
-  // ---------- Clavier ----------
-  const kbEl = document.getElementById('kb');
-  let octaveBase = 48;            // Do3
-  // En paysage on affiche 3 octaves — pensé pour poser le téléphone sur le piano.
-  function whitesPerView() { return window.innerWidth > window.innerHeight ? 21 : 14; }
-  let WHITE_PER_VIEW = whitesPerView();
-  const WHITE_PC = [0, 2, 4, 5, 7, 9, 11];
-  // position des noires : après quelle touche blanche de l'octave (index 0-6)
-  const BLACK_AFTER = { 1: 0, 3: 1, 6: 3, 8: 4, 10: 5 };
-
-  let noteHandler = null;          // hook pédagogique (leçons, quiz, mélodies)
-  const shown = new Map();         // midi -> classe d'affichage ('show'|'root'|'hint')
-  const fingers = new Map();       // midi -> doigté à afficher
-
-  function labelFor(midi) {
-    if (prog.labels === 'off') return '';
-    const pc = midi % 12;
-    const names = prog.labels === 'en' ? EN : FR;
-    return names[pc];
-  }
-  function noteName(midi, withOct = true) {
-    const names = prog.labels === 'en' ? EN : FR;
-    const oct = Math.floor(midi / 12) - 1;
-    return names[midi % 12] + (withOct ? oct : '');
-  }
-
-  function renderKeyboard() {
-    const whites = [];
-    let midi = octaveBase;
-    while (whites.length < WHITE_PER_VIEW + 1) {
-      if (!BLACK.has(midi % 12)) whites.push(midi);
-      midi++;
-    }
-    const wCount = whites.length;
-    let html = '';
-    whites.forEach((m) => {
-      const extra = shown.get(m) ? ` key--${shown.get(m)}` : '';
-      const fing = fingers.has(m) ? ' key--finger' : '';
-      html += `<button class="key${extra}${fing}" data-midi="${m}" type="button" aria-label="${noteName(m)}">
-        <span class="key__finger">${fingers.get(m) || ''}</span>
-        <span class="key__label">${labelFor(m)}${prog.labels !== 'off' && m % 12 === 0 ? Math.floor(m / 12) - 1 : ''}</span>
-      </button>`;
-    });
-    // noires par-dessus
-    whites.forEach((m, i) => {
-      if (i === wCount - 1) return;
-      const pc = m % 12;
-      const bpc = pc + 1;
-      if (!BLACK.has(bpc % 12)) return;
-      const bm = m + 1;
-      const bw = 79 / wCount;   // noire ≈ 0,79 blanche — proportions réalistes, restant tapable
-      const left = ((i + 1) / wCount * 100) - bw / 2;
-      const extra = shown.get(bm) ? ` bkey--${shown.get(bm)}` : '';
-      html += `<button class="bkey${extra}" style="left:${left}%;width:${bw}%" data-midi="${bm}" type="button" aria-label="${noteName(bm)}">
-        <span class="bkey__label">${prog.labels === 'off' ? '' : labelFor(bm)}</span>
-      </button>`;
-    });
-    kbEl.innerHTML = html;
-    document.getElementById('kbRange').textContent = `${noteName(whites[0])} – ${noteName(whites[wCount - 1])}`;
-
-    kbEl.querySelectorAll('[data-midi]').forEach(k => {
-      k.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        const m = Number(k.dataset.midi);
-        pressKey(m, k);
+  // ================= L'OREILLE =================
+  // Pipeline (état de l'art transcription monophonique) :
+  // 1) enveloppe d'énergie -> détection d'ATTAQUES (le piano est percussif,
+  //    c'est le signal le plus fiable — et ça capte les notes répétées) ;
+  // 2) hauteur par YIN (CMNDF + seuil absolu + interpolation parabolique),
+  //    bien plus robuste que l'autocorrélation simple ;
+  // 3) machine à états note ouverte / silence -> événements {m, t0, t1}.
+  const GATE = 0.010;
+  const Ear = {
+    stream: null, analyser: null, timer: null, on: false,
+    onNote: null,     // (midi, tSec) à l'ouverture d'une note
+    onEvent: null,    // ({m,t0,t1}) à la fermeture
+    live: null,       // (texte) indicateur temps réel
+    _buf: null, _hist: [], _cur: null, _pend: null, _silent: 0, _lastOn: 0,
+    async start() {
+      if (this.on) return;
+      audio();
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
-    });
-  }
+      const src = actx.createMediaStreamSource(this.stream);
+      this.analyser = actx.createAnalyser();
+      this.analyser.fftSize = 2048;
+      src.connect(this.analyser);
+      this._buf = new Float32Array(2048);
+      this._hist = []; this._cur = null; this._pend = null; this._silent = 0;
+      this.timer = setInterval(() => this._tick(), 25);
+      this.on = true;
+      listenUI(true);
+    },
+    stop() {
+      clearInterval(this.timer); this.timer = null;
+      try { this.stream?.getTracks().forEach(t => t.stop()); } catch {}
+      this.stream = null; this.analyser = null; this.on = false;
+      this._close(actx ? actx.currentTime : 0);
+      listenUI(false);
+    },
+    _close(t) {
+      if (this._cur) {
+        const ev = { m: this._cur.m, t0: this._cur.t0, t1: t };
+        this._cur = null;
+        if (this.onEvent) this.onEvent(ev);
+      }
+    },
+    _tick() {
+      const now = actx.currentTime;
+      this.analyser.getFloatTimeDomainData(this._buf);
+      const { f, rms } = yin(this._buf, actx.sampleRate);
+      // enveloppe -> attaque : montée franche au-dessus de la médiane récente
+      this._hist.push(rms);
+      if (this._hist.length > 14) this._hist.shift();
+      const med = median(this._hist);
+      const onset = rms > GATE * 1.6 && rms > med * 2.3 && (now - this._lastOn) > 0.09;
+      if (onset) this._lastOn = now;
 
-  function keyEl(midi) { return kbEl.querySelector(`[data-midi="${midi}"]`); }
-  function flashKey(midi, cls, ms = 260) {
-    const k = keyEl(midi);
-    if (!k) return;
-    const c = (k.classList.contains('bkey') ? 'bkey--' : 'key--') + cls;
-    k.classList.add(c);
-    setTimeout(() => k.classList.remove(c), ms);
+      const midi = f > 0 ? Math.round(69 + 12 * Math.log2(f / 440)) : -1;
+      const okPitch = midi >= 21 && midi <= 108;
+
+      if (rms < GATE || !okPitch) {
+        this._silent++;
+        if (this._silent >= 3) { this._close(now - 0.05); this._pend = null; if (this.live) this.live(''); }
+        return;
+      }
+      this._silent = 0;
+      if (this.live) this.live(noteName(midi));
+
+      if (onset) {
+        // nouvelle frappe : on ferme la note en cours, la hauteur se confirme
+        this._close(now);
+        this._pend = { m: midi, n: 1, t0: now };
+        return;
+      }
+      if (this._pend) {
+        if (midi === this._pend.m) this._pend.n++;
+        else { this._pend = { m: midi, n: 1, t0: this._pend.t0 }; }
+        if (this._pend.n >= 2) {
+          this._cur = { m: this._pend.m, t0: this._pend.t0 };
+          this._pend = null;
+          if (this.onNote) this.onNote(this._cur.m, this._cur.t0);
+        }
+        return;
+      }
+      if (!this._cur) {
+        this._pend = { m: midi, n: 1, t0: now - 0.025 };
+      } else if (midi !== this._cur.m) {
+        // changement de hauteur sans attaque nette (legato) : confirmé
+        // sur 2 trames consécutives pour ignorer les micro-erreurs de YIN
+        if (this._chg === midi) {
+          this._close(now);
+          this._cur = { m: midi, t0: now - 0.05 };
+          this._chg = null;
+          if (this.onNote) this.onNote(midi, this._cur.t0);
+        } else this._chg = midi;
+      } else this._chg = null;
+    },
+  };
+  function median(a) {
+    if (!a.length) return 0;
+    const s = a.slice().sort((x, y) => x - y);
+    return s[s.length >> 1];
   }
-  // Canal unique pour toutes les notes — écran OU vrai piano via le micro.
-  // Les leçons, mélodies guidées et l'enregistrement de partition sont
-  // agnostiques de la source.
-  let lastSynthAt = 0;
-  function emitNote(midi, fromMic) {
-    if (recording) recNotes.push({ m: midi, t: Date.now() - recStart });
-    if (noteHandler) noteHandler(midi);
-    if (recording && tab === 'partition') renderScoreLive();
-  }
-  function pressKey(midi, el) {
-    playNote(midi);
-    lastSynthAt = Date.now();   // le micro doit ignorer le son du synthé
-    if (el) {
-      const down = el.classList.contains('bkey') ? 'bkey--down' : 'key--down';
-      el.classList.add(down);
-      setTimeout(() => el.classList.remove(down), 140);
+  // YIN : différence cumulative normalisée + seuil absolu + parabole.
+  function yin(buf, sr) {
+    const SIZE = buf.length, HALF = SIZE >> 1;
+    let rms = 0;
+    for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / SIZE);
+    if (rms < GATE) return { f: -1, rms };
+    const tauMin = Math.max(20, Math.floor(sr / 2100));   // ~Do7
+    const tauMax = Math.min(HALF - 2, Math.ceil(sr / 50)); // ~Sol1
+    const d = new Float32Array(tauMax + 2);
+    for (let tau = tauMin; tau <= tauMax + 1; tau++) {
+      let s = 0;
+      for (let i = 0; i < HALF; i++) { const del = buf[i] - buf[i + tau]; s += del * del; }
+      d[tau] = s;
     }
-    if (navigator.vibrate) { try { navigator.vibrate(4); } catch {} }
-    emitNote(midi, false);
-  }
-  function micNote(midi) {
-    // Anti-larsen logique : juste après une note jouée par le synthé, la
-    // détection entend l'app elle-même — on l'ignore.
-    if (Date.now() - lastSynthAt < 450) return;
-    const k = keyEl(midi);
-    if (k) {
-      const cls = k.classList.contains('bkey') ? 'bkey--down' : 'key--down';
-      k.classList.add(cls);
-      setTimeout(() => k.classList.remove(cls), 180);
+    let run = 0, tau = -1;
+    const cm = new Float32Array(tauMax + 2);
+    for (let t = tauMin; t <= tauMax + 1; t++) { run += d[t]; cm[t] = d[t] * (t - tauMin + 1) / run; }
+    for (let t = tauMin + 1; t <= tauMax; t++) {
+      if (cm[t] < 0.14) {
+        while (t + 1 <= tauMax && cm[t + 1] < cm[t]) t++;
+        tau = t; break;
+      }
     }
-    emitNote(midi, true);
+    if (tau < 0) {
+      let min = 1, mi = -1;
+      for (let t = tauMin + 1; t <= tauMax; t++) if (cm[t] < min) { min = cm[t]; mi = t; }
+      if (min < 0.30) tau = mi; else return { f: -1, rms };
+    }
+    const x0 = cm[tau - 1] ?? cm[tau], x2 = cm[tau + 1] ?? cm[tau];
+    const a = (x0 + x2 - 2 * cm[tau]) / 2, b = (x2 - x0) / 2;
+    const t2 = a ? tau - b / (2 * a) : tau;
+    return { f: sr / t2, rms };
   }
 
-  function clearMarks() {
-    shown.clear();
-    fingers.clear();
-    renderKeyboard();
+  // Bouton Écoute (indicateur global)
+  const liveEl = $('kbLive');
+  function listenUI(on) {
+    $('listenBtn').classList.toggle('hero-btn--on', on);
+    liveEl.hidden = !on;
+    if (on) liveEl.textContent = '· · ·';
   }
-  function mark(midis, cls, fing) {
-    midis.forEach((m, i) => {
-      shown.set(m, cls);
-      if (fing) fingers.set(m, fing[i]);
+  Ear.live = (txt) => { if (!liveEl.hidden) liveEl.textContent = txt || '· · ·'; };
+  $('listenBtn').addEventListener('click', async () => {
+    if (Ear.on) { Ear.stop(); return; }
+    try { await Ear.start(); }
+    catch { liveEl.hidden = false; liveEl.textContent = 'micro refusé'; setTimeout(() => { liveEl.hidden = true; }, 2500); }
+  });
+
+  // ================= QUANTIFICATION =================
+  // Tempo estimé sur les intervalles entre attaques (médiane), calé vers
+  // 60-140 bpm, puis tout est arrondi à la double-croche. Les trous entre
+  // fin de note et attaque suivante deviennent des SILENCES ; les trous
+  // minuscules sont absorbés dans la durée (le piano s'éteint tout seul).
+  function quantize(events, name, date) {
+    events = events.filter(e => e.m >= 21 && e.m <= 108).sort((a, b) => a.t0 - b.t0);
+    const iois = [];
+    for (let i = 1; i < events.length; i++) {
+      const d = events[i].t0 - events[i - 1].t0;
+      if (d > 0.12 && d < 2.5) iois.push(d);
+    }
+    let beat = iois.length ? median(iois) : 0.6;
+    while (60 / beat > 150) beat *= 2;
+    while (60 / beat < 55) beat /= 2;
+    const bpm = Math.round(60 / beat);
+    const spb = 60 / bpm;
+    const ref = events.length ? events[0].t0 : 0;
+    const Q = (x) => Math.round(x / spb * 4) / 4;   // grille : double-croche
+    const notes = [];
+    events.forEach((e, i) => {
+      const s = Q(e.t0 - ref);
+      let d = Math.max(0.25, Q(Math.max(0.1, e.t1 - e.t0)));
+      const next = events[i + 1];
+      if (next) {
+        const gap = Q(next.t0 - ref) - s;
+        if (gap <= 0) return;                        // fusion de doublon
+        if (gap - d < 0.5) d = gap;                  // trou minuscule absorbé
+        d = Math.min(d, gap);
+      }
+      d = Math.min(d, 4);
+      notes.push({ m: e.m, s, d });
     });
-    renderKeyboard();
-  }
-  function ensureVisible(midi) {
-    // recadre le clavier pour que la note soit dans la fenêtre
-    const lo = octaveBase, hi = octaveBase + (WHITE_PER_VIEW / 7) * 12;
-    if (midi < lo) { octaveBase = Math.max(24, octaveBase - 12 * Math.ceil((lo - midi) / 12)); renderKeyboard(); }
-    else if (midi > hi) { octaveBase = Math.min(84, octaveBase + 12 * Math.ceil((midi - hi) / 12)); renderKeyboard(); }
+    return {
+      id: 'p' + Date.now().toString(36) + Math.floor(Math.random() * 99),
+      name: name || null, date: date || Date.now(),
+      bpm, bpb: 4, notes,
+    };
   }
 
-  document.getElementById('octDown').addEventListener('click', () => {
-    octaveBase = Math.max(24, octaveBase - 12);
-    renderKeyboard();
-  });
-  document.getElementById('octUp').addEventListener('click', () => {
-    octaveBase = Math.min(84, octaveBase + 12);
-    renderKeyboard();
-  });
-  const labelsBtn = document.getElementById('labelsBtn');
-  function labelsBtnText() {
-    labelsBtn.textContent = prog.labels === 'fr' ? 'Do Ré Mi' : prog.labels === 'en' ? 'C D E' : 'Sans noms';
-    labelsBtn.classList.toggle('kb-tool--on', prog.labels !== 'off');
-  }
-  labelsBtn.addEventListener('click', () => {
-    prog.labels = prog.labels === 'fr' ? 'en' : prog.labels === 'en' ? 'off' : 'fr';
-    saveProg();
-    labelsBtnText();
-    renderKeyboard();
-  });
-
-  // ---------- Scène / navigation ----------
-  const stage = document.getElementById('stage');
-  const headSub = document.getElementById('headSub');
-  let tab = 'jouer';
-  function switchTab(t) {
-    tab = t;
-    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('tab--active', b.dataset.tab === t));
-    noteHandler = null;
-    clearMarks();
-    render();
-  }
-  document.getElementById('tabs').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-tab]');
-    if (!b) return;
-    switchTab(b.dataset.tab);
-  });
-
-  function render() {
-    if (tab === 'jouer') renderJouer();
-    else if (tab === 'apprendre') renderApprendre();
-    else if (tab === 'studio') renderStudio();
-    else renderPartition();
-  }
-
-  // Studio = Entraîner + Dico, réunis derrière un petit sélecteur.
-  let studioView = 'entrainer';
-  function renderStudio() {
-    if (studioView === 'dico') renderDico(); else renderEntrainer();
-  }
-  function injectStudioSeg() {
-    stage.insertAdjacentHTML('afterbegin', `
-      <div class="seg">
-        <button class="seg__btn ${studioView === 'entrainer' ? 'seg__btn--on' : ''}" data-seg-v="entrainer" type="button">Entraîner</button>
-        <button class="seg__btn ${studioView === 'dico' ? 'seg__btn--on' : ''}" data-seg-v="dico" type="button">Dico</button>
-      </div>`);
-    stage.querySelectorAll('[data-seg-v]').forEach(b => b.addEventListener('click', () => {
-      studioView = b.dataset.segV;
-      renderStudio();
-    }));
-  }
-
-  // ================= PARTITION =================
-  // Ce que tu joues s'écrit : touche l'écran ou active l'Écoute et joue sur
-  // le vrai piano — les notes se posent sur la portée en direct.
-  let recording = false, recStart = 0, recNotes = [];
-  if (!Array.isArray(prog.recs)) prog.recs = [];
-
-  // Enregistrement global : le bouton ⏺ du haut marche depuis n'importe quel
-  // onglet — écran ou vrai piano (mode Écoute). Stop → la partition s'ouvre.
-  const recBtn = document.getElementById('recBtn');
-  function setRecUI() {
-    recBtn.classList.toggle('hero-btn--recording', recording);
-  }
-  function startRec() {
-    recording = true; recStart = Date.now(); recNotes = [];
-    setRecUI();
-    if (tab === 'partition') renderPartition();
-  }
-  function stopRec() {
-    recording = false;
-    setRecUI();
-    if (!recNotes.length) { if (tab === 'partition') renderPartition(); return; }
-    const name = 'Partition du ' + new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
-      + ' · ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    const rec = { id: 'r' + Date.now().toString(36), name, date: Date.now(), notes: recNotes };
-    prog.recs.push(rec);
-    while (prog.recs.length > 20) prog.recs.shift();
-    saveProg();
-    recNotes = [];
-    switchTab('partition');
-    openRec(rec.id);
-  }
-  function cancelRec() {
-    recording = false; recNotes = [];
-    setRecUI();
-    if (tab === 'partition') renderPartition();
-  }
-  recBtn.addEventListener('click', () => (recording ? stopRec() : startRec()));
-
-  // midi → position diatonique (lettre + octave) pour la portée en clé de sol.
-  const PC_LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];   // C C# D D# E F F# G G# A A# B
+  // ================= PARTITION (rendu SVG avec rythme) =================
+  const PC_LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
   const PC_SHARP = [false, true, false, true, false, false, true, false, true, false, true, false];
-  function diatonic(midi) {
-    const oct = Math.floor(midi / 12) - 1;
-    return oct * 7 + PC_LETTER[midi % 12];
+  function diatonic(midi) { return (Math.floor(midi / 12) - 1) * 7 + PC_LETTER[midi % 12]; }
+  const E4_DIA = diatonic(64);
+  // durée (en temps) -> figure : [base, pointée]
+  function figure(d) {
+    const F = [[4, 4, 0], [3, 2, 1], [2, 2, 0], [1.5, 1, 1], [1, 1, 0], [0.75, 0.5, 1], [0.5, 0.5, 0], [0.25, 0.25, 0]];
+    let best = F[4];
+    for (const f of F) if (Math.abs(f[0] - d) < Math.abs(best[0] - d)) best = f;
+    return best; // [valeur, base, pointée]
   }
-  const E4_DIA = diatonic(64);   // ligne du bas de la portée
-
-  function scoreSVG(notes) {
-    const GAP = 9;                     // interligne
-    const STEP = GAP / 2;              // un degré diatonique
-    const NW = 26;                     // espacement horizontal des notes
-    const left = 34;
-    const w = Math.max(300, left + notes.length * NW + 20);
-    const top = 30, bottomLine = top + 4 * GAP;
-    let s = `<svg class="score" viewBox="0 0 ${w} ${bottomLine + 42}" width="${w}">`;
-    for (let i = 0; i < 5; i++) {
-      const y = top + i * GAP;
-      s += `<line x1="8" y1="${y}" x2="${w - 8}" y2="${y}" class="score__line"/>`;
+  function restGlyphs(gap) {
+    const out = [];
+    for (const v of [4, 2, 1, 0.5, 0.25]) {
+      while (gap >= v - 0.01) { out.push(v); gap -= v; }
     }
-    s += `<text x="12" y="${bottomLine - 2}" class="score__clef">𝄞</text>`;
+    return out;
+  }
+  function scoreSVG(score, opts = {}) {
+    const GAP = 9, STEP = GAP / 2, PXB = 46, left = 44;
+    const notes = score.notes;
+    const totalBeats = notes.length ? Math.max(...notes.map(n => n.s + n.d)) : 4;
+    const w = Math.max(320, left + totalBeats * PXB + 30);
+    const top = 34, bot = top + 4 * GAP, midY = top + 2 * GAP;
+    let s = `<svg class="score" viewBox="0 0 ${w} ${bot + 46}" width="${w}">`;
+    for (let i = 0; i < 5; i++)
+      s += `<line x1="8" y1="${top + i * GAP}" x2="${w - 8}" y2="${top + i * GAP}" class="score__line"/>`;
+    s += `<text x="12" y="${bot - 2}" class="score__clef">𝄞</text>`;
+    // mesures
+    const bpb = score.bpb || 4;
+    for (let b = bpb; b <= totalBeats + 0.01; b += bpb) {
+      const x = left + b * PXB - 6;
+      s += `<line x1="${x}" y1="${top}" x2="${x}" y2="${bot}" class="score__bar"/>`;
+    }
+    let cursor = 0;
     notes.forEach((n, i) => {
-      const x = left + 14 + i * NW;
-      const y = bottomLine - (diatonic(n.m) - E4_DIA) * STEP;
-      // lignes supplémentaires
-      for (let ly = bottomLine + GAP; ly <= y + 1; ly += GAP)
-        s += `<line x1="${x - 8}" y1="${ly}" x2="${x + 8}" y2="${ly}" class="score__line"/>`;
-      for (let ly = top - GAP; ly >= y - 1; ly -= GAP)
-        s += `<line x1="${x - 8}" y1="${ly}" x2="${x + 8}" y2="${ly}" class="score__line"/>`;
+      // silence avant la note
+      const gap = n.s - cursor;
+      if (gap >= 0.24) {
+        let gx = left + cursor * PXB + 10;
+        for (const v of restGlyphs(gap)) {
+          s += restSVG(v, gx, midY);
+          gx += v * PXB * 0.6;
+        }
+      }
+      cursor = Math.max(cursor, n.s + n.d);
+      const x = left + n.s * PXB + 10;
+      const y = bot - (diatonic(n.m) - E4_DIA) * STEP;
+      for (let ly = bot + GAP; ly <= y + 1; ly += GAP) s += `<line x1="${x - 8}" y1="${ly}" x2="${x + 8}" y2="${ly}" class="score__line"/>`;
+      for (let ly = top - GAP; ly >= y - 1; ly -= GAP) s += `<line x1="${x - 8}" y1="${ly}" x2="${x + 8}" y2="${ly}" class="score__line"/>`;
       if (PC_SHARP[n.m % 12]) s += `<text x="${x - 14}" y="${y + 3.5}" class="score__acc">♯</text>`;
-      s += `<ellipse cx="${x}" cy="${y}" rx="5.4" ry="4" class="score__note" transform="rotate(-18 ${x} ${y})"/>`;
-      s += `<line x1="${x + 5}" y1="${y - 1.5}" x2="${x + 5}" y2="${y - 26}" class="score__stem"/>`;
+      const [, base, dotted] = figure(n.d);
+      const hollow = base >= 2;
+      const cls = opts.mark === i ? ' score__note--cur' : '';
+      s += `<ellipse cx="${x}" cy="${y}" rx="5.4" ry="4" class="score__note${hollow ? ' score__note--o' : ''}${cls}" transform="rotate(-18 ${x} ${y})"/>`;
+      if (base < 4) s += `<line x1="${x + 5}" y1="${y - 1.5}" x2="${x + 5}" y2="${y - 26}" class="score__stem"/>`;
+      if (base <= 0.5) s += `<path d="M ${x + 5},${y - 26} q 8,3 7,12" class="score__flag"/>`;
+      if (base <= 0.25) s += `<path d="M ${x + 5},${y - 20} q 8,3 7,12" class="score__flag"/>`;
+      if (dotted) s += `<circle cx="${x + 10}" cy="${y - 1}" r="1.7" class="score__dot"/>`;
+      if (opts.names) s += `<text x="${x}" y="${bot + 26}" text-anchor="middle" class="score__nm">${FR[n.m % 12]}</text>`;
     });
-    if (!notes.length) s += `<text x="${w / 2}" y="${bottomLine - GAP}" text-anchor="middle" class="score__empty">La portée attend tes notes…</text>`;
+    if (!notes.length) s += `<text x="${w / 2}" y="${midY + 3}" text-anchor="middle" class="score__empty">La portée attend la musique…</text>`;
     s += '</svg>';
     return s;
   }
-
-  function renderScoreLive() {
-    const holder = stage.querySelector('[data-live-score]');
-    if (!holder) return;
-    holder.innerHTML = scoreSVG(recNotes);
-    holder.scrollLeft = holder.scrollWidth;
-    const cnt = stage.querySelector('[data-rec-count]');
-    if (cnt) cnt.textContent = recNotes.length + ' note' + (recNotes.length > 1 ? 's' : '');
+  function restSVG(v, x, midY) {
+    if (v >= 4) return `<rect x="${x - 5}" y="${midY - 9}" width="12" height="4.5" class="score__rest"/>`;
+    if (v >= 2) return `<rect x="${x - 5}" y="${midY - 4.5}" width="12" height="4.5" class="score__rest"/>`;
+    if (v >= 1) return `<path d="M ${x},${midY - 11} l 5,6 l -5,6 q 6,2 3,8" class="score__restq"/>`;
+    if (v >= 0.5) return `<path d="M ${x + 3},${midY - 6} q -5,3 -6,0 m 6,0 l -4,12" class="score__restq"/>`;
+    return `<path d="M ${x + 3},${midY - 8} q -5,3 -6,0 m 6,0 l -5,14 m 4,-8 q -5,3 -6,0" class="score__restq"/>`;
   }
 
+  // ================= ŒUVRES INTÉGRÉES =================
+  function builtin(id, name, icon, level, bpm, bpb, notesStr, beats) {
+    const ms = N(notesStr);
+    let s = 0;
+    const notes = ms.map((m, i) => { const n = { m, s, d: beats[i] }; s += beats[i]; return n; });
+    return { id, name, icon, level, bpm, bpb, notes, builtin: true };
+  }
+  const ELISE_RUN = 'E5 D#5 E5 D#5 E5 B4 D5 C5 A4';
+  const EA1 = ELISE_RUN + ' C4 E4 A4 B4 E4 G#4 B4 C5 E4';
+  const EA2 = ELISE_RUN + ' C4 E4 A4 B4 E4 C5 B4 A4';
+  const EB = 'B4 C5 D5 E5 G4 F5 E5 D5 F4 E5 D5 C5 E4 D5 C5 B4';
+  const BR = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 1];
+  const BA1 = BR.concat([0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5]);
+  const BA2 = BR.concat([0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 2]);
+  const BB = [0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1, 0.5, 0.5, 0.5, 1];
+  const ODE_A = 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 E4 D4 D4';
+  const ODE_A2 = 'E4 E4 F4 G4 G4 F4 E4 D4 C4 C4 D4 E4 D4 C4 C4';
+  const ODE_B = 'D4 D4 E4 C4 D4 E4 F4 E4 C4 D4 E4 F4 E4 D4 C4 D4 G3';
+  const OB = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1.5, 0.5, 2];
+  const OBB = [1, 1, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 0.5, 0.5, 1, 1, 1, 1, 2];
+  const BUILTINS = [
+    builtin('elise', 'Lettre à Élise · Beethoven', '🕯️', 'Moyen', 120, 1.5,
+      [EA1, EA2, EB, EA2, EB, EA2].join(' '),
+      [].concat(BA1, BA2, BB, BA2, BB, BA2.slice(0, -1), [3])),
+    builtin('joie', 'Ode à la joie · Beethoven', '🎼', 'Facile', 108, 4,
+      [ODE_A, ODE_A2, ODE_B, ODE_A2, ODE_B, ODE_A2].join(' '),
+      [].concat(OB, OB, OBB, OB, OBB, OB.slice(0, -1), [3])),
+    builtin('twinkle', 'Ah ! vous dirai-je, maman · Mozart', '⭐', 'Néophyte', 112, 4,
+      `C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4
+       G4 G4 F4 F4 E4 E4 D4 G4 G4 F4 F4 E4 E4 D4
+       C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4`,
+      [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 3]),
+    builtin('greensleeves', 'Greensleeves · Traditionnel', '🍃', 'Moyen', 120, 3,
+      `A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 A4 A4 G#4 A4 B4 G#4 E4
+       A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 B4 A4 G#4 F#4 G#4 A4 A4`,
+      [1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 2, 1, 3,
+        1, 2, 1, 1.5, 0.5, 1, 2, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 1.5, 0.5, 1, 2, 3]),
+  ];
+
+  const data = load();
+  save();
+
+  // ================= LECTURE D'UNE PARTITION =================
+  let playTimers = [];
+  function stopPlayback() { playTimers.forEach(clearTimeout); playTimers = []; }
+  function playScore(score, mult = 1) {
+    stopPlayback();
+    const spb = 60 / (score.bpm * mult);
+    score.notes.forEach(n => {
+      playTimers.push(setTimeout(() => playNote(n.m, Math.max(0.35, n.d * spb * 0.95), 0.8), n.s * spb * 1000));
+    });
+  }
+
+  // ================= ONGLET PARTITION =================
+  let rec = null; // {events, t0, liveTimer}
   function renderPartition() {
-    headSub.textContent = 'Ce que tu joues s\'écrit';
-    noteHandler = null;
-    clearMarks();
-    if (recording) { renderRecordingUI(); return; }
-    const recs = prog.recs.slice().reverse();
-    const rows = recs.length ? recs.map(r => `
-      <div class="songrow" data-rec="${r.id}">
+    headSub.textContent = 'Ce qui se joue s\'écrit';
+    stopPlayback();
+    Ear.onNote = null; Ear.onEvent = null;
+    if (rec) { renderRecording(); return; }
+    const scores = data.scores.slice().reverse();
+    const rows = scores.map(sc => `
+      <div class="songrow" data-open="${sc.id}">
         <span class="songrow__icon">𝄞</span>
         <span class="songrow__main">
-          <span class="songrow__name">${escapeHTMLp(r.name)}</span>
-          <div class="songrow__meta">${r.notes.length} notes · ${new Date(r.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</div>
+          <span class="songrow__name">${esc(sc.name)}</span>
+          <div class="songrow__meta">${sc.notes.length} notes · ♩ = ${sc.bpm} · ${new Date(sc.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</div>
         </span>
-      </div>`).join('') : '';
+      </div>`).join('');
     stage.innerHTML = `
-      <div class="card">
-        <div class="card__title">Nouvelle partition</div>
-        <div class="card__sub">Enregistre puis joue — sur l'écran, ou sur ton vrai piano avec <strong>Écoute</strong> activé. Le bouton ⏺ en haut marche depuis n'importe quel onglet.</div>
-        <div class="session__row" style="justify-content:flex-start">
-          <button class="btn btn--small" data-rec-start type="button">● Enregistrer</button>
-        </div>
+      <div class="card reccard">
+        <div class="card__title">Écouter &amp; transcrire</div>
+        <div class="card__sub">Pose le téléphone près du piano — quelqu'un joue (ou une vidéo tourne sur l'ordi), l'app écrit la partition : notes, rythme <strong>et silences</strong>.</div>
+        <button class="bigrec" id="recStart" type="button"><i></i>Enregistrer</button>
       </div>
-      ${recs.length ? `<div class="card"><div class="card__title">Mes partitions</div><div class="songlist" style="margin-top:10px">${rows}</div></div>` : ''}`;
-    stage.querySelector('[data-rec-start]').addEventListener('click', startRec);
-    stage.querySelectorAll('[data-rec]').forEach(el => el.addEventListener('click', () => openRec(el.dataset.rec)));
+      ${scores.length ? `<div class="card"><div class="card__title">Mes partitions</div><div class="songlist" style="margin-top:10px">${rows}</div></div>` : ''}`;
+    $('recStart').addEventListener('click', startRecording);
+    stage.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => openScore(el.dataset.open)));
   }
 
-  function renderRecordingUI() {
+  async function startRecording() {
+    try { await Ear.start(); }
+    catch { alert('Le micro est nécessaire pour transcrire.'); return; }
+    rec = { events: [], live: [] };
+    Ear.onEvent = (ev) => { rec.events.push(ev); renderRecLive(); };
+    Ear.onNote = () => renderRecLive(true);
+    renderRecording();
+  }
+  function renderRecording() {
     stage.innerHTML = `
       <div class="card">
-        <div class="rec-head">
-          <span class="rec-dot"></span>
-          <span class="card__title">Enregistrement…</span>
-          <span class="rec-count" data-rec-count>0 note</span>
-        </div>
-        <div class="score-scroll" data-live-score></div>
+        <div class="rec-head"><span class="rec-dot"></span><span class="card__title">J'écoute…</span><span class="rec-count" id="recCount">0 note</span></div>
+        <div class="card__sub">Joue naturellement — les pauses deviendront des soupirs et des silences sur la portée.</div>
+        <div class="score-scroll" id="recScore">${scoreSVG({ notes: [], bpb: 4 })}</div>
         <div class="session__row" style="justify-content:flex-start">
-          <button class="btn btn--small" data-rec-stop type="button">■ Terminer</button>
-          <button class="btn btn--ghost btn--small" data-rec-cancel type="button">Annuler</button>
+          <button class="btn btn--small" id="recStop" type="button">■ Terminer</button>
+          <button class="btn btn--ghost btn--small" id="recCancel" type="button">Annuler</button>
         </div>
       </div>`;
-    renderScoreLive();
-    stage.querySelector('[data-rec-stop]').addEventListener('click', stopRec);
-    stage.querySelector('[data-rec-cancel]').addEventListener('click', cancelRec);
+    $('recStop').addEventListener('click', stopRecording);
+    $('recCancel').addEventListener('click', () => { rec = null; Ear.onEvent = null; Ear.onNote = null; renderPartition(); });
+    renderRecLive();
+  }
+  let recThrottle = 0;
+  function renderRecLive() {
+    const c = $('recCount');
+    if (c) c.textContent = rec.events.length + ' note' + (rec.events.length > 1 ? 's' : '');
+    const now = Date.now();
+    if (now - recThrottle < 400) return;
+    recThrottle = now;
+    const holder = $('recScore');
+    if (holder && rec.events.length) {
+      holder.innerHTML = scoreSVG(quantize(rec.events));
+      holder.scrollLeft = holder.scrollWidth;
+    }
+  }
+  function stopRecording() {
+    Ear.onEvent = null; Ear.onNote = null;
+    const events = rec.events; rec = null;
+    if (!events.length) { renderPartition(); return; }
+    const sc = quantize(events);
+    sc.name = 'Partition du ' + new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
+      + ' · ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    data.scores.push(sc);
+    while (data.scores.length > 30) data.scores.shift();
+    save();
+    openScore(sc.id);
   }
 
-  function openRec(id) {
-    const r = prog.recs.find(x => x.id === id);
-    if (!r) { renderPartition(); return; }
+  function openScore(id) {
+    const sc = data.scores.find(x => x.id === id);
+    if (!sc) { renderPartition(); return; }
+    stopPlayback();
     stage.innerHTML = `
       <div class="card">
-        <div class="card__title" data-rec-name>${escapeHTMLp(r.name)}</div>
-        <div class="card__sub">${r.notes.length} notes · ${new Date(r.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</div>
-        <div class="score-scroll">${scoreSVG(r.notes)}</div>
+        <div class="card__title">${esc(sc.name)}</div>
+        <div class="card__sub">${sc.notes.length} notes · ♩ = ${sc.bpm} · silences détectés</div>
+        <div class="score-scroll">${scoreSVG(sc, { names: true })}</div>
         <div class="session__row" style="justify-content:flex-start">
-          <button class="btn btn--small" data-play type="button">▶ Écouter</button>
-          <button class="btn btn--ghost btn--small" data-practice type="button">Travailler en guidé</button>
-          <button class="btn btn--ghost btn--small" data-rename type="button">Renommer</button>
-          <button class="btn btn--ghost btn--small" data-del type="button">Supprimer</button>
-          <button class="btn btn--ghost btn--small" data-back type="button">Retour</button>
+          <button class="btn btn--small" data-a="play" type="button">▶ Écouter</button>
+          <button class="btn btn--small" data-a="game" type="button">🎹 La jouer</button>
+          <button class="btn btn--ghost btn--small" data-a="ren" type="button">Renommer</button>
+          <button class="btn btn--ghost btn--small" data-a="del" type="button">Supprimer</button>
+          <button class="btn btn--ghost btn--small" data-a="back" type="button">Retour</button>
         </div>
       </div>`;
-    stage.querySelector('[data-back]').addEventListener('click', renderPartition);
-    stage.querySelector('[data-play]').addEventListener('click', () => {
-      // rejoue avec le rythme d'origine (silences bornés à 1,2 s)
-      let acc = 0, prev = null;
-      r.notes.forEach((n) => {
-        const gap = prev === null ? 0 : Math.min(1200, Math.max(140, n.t - prev));
-        acc += gap;
-        prev = n.t;
-        playNote(n.m, 0.8, 0.8, acc / 1000);
-      });
+    stage.querySelector('[data-a="back"]').addEventListener('click', renderPartition);
+    stage.querySelector('[data-a="play"]').addEventListener('click', () => playScore(sc));
+    stage.querySelector('[data-a="game"]').addEventListener('click', () => { switchTab('jouer'); configGame(sc); });
+    stage.querySelector('[data-a="ren"]').addEventListener('click', () => {
+      const v = prompt('Nom de la partition :', sc.name);
+      if (v && v.trim()) { sc.name = v.trim().slice(0, 60); save(); openScore(id); }
     });
-    stage.querySelector('[data-practice]').addEventListener('click', () => {
-      startSongObj({ id: null, name: r.name, icon: '𝄞', notes: r.notes.map(n => n.m) }, () => openRec(id));
-    });
-    stage.querySelector('[data-rename]').addEventListener('click', () => {
-      const v = prompt('Nom de la partition :', r.name);
-      if (v && v.trim()) { r.name = v.trim().slice(0, 60); saveProg(); openRec(id); }
-    });
-    stage.querySelector('[data-del]').addEventListener('click', () => {
+    stage.querySelector('[data-a="del"]').addEventListener('click', () => {
       if (!confirm('Supprimer cette partition ?')) return;
-      prog.recs = prog.recs.filter(x => x.id !== id);
-      saveProg();
+      data.scores = data.scores.filter(x => x.id !== id);
+      save();
       renderPartition();
     });
   }
 
-  function escapeHTMLp(s) {
-    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  // ================= MUSIQUES =================
+  // ================= ONGLET JOUER (le jeu) =================
   const LVL_ORDER = { 'Néophyte': 0, 'Facile': 1, 'Moyen': 2, 'Difficile': 3 };
-  function lvlDots(level) {
-    const n = (LVL_ORDER[level] ?? 1) + 1;
-    return '●'.repeat(n) + '○'.repeat(4 - n);
-  }
   function renderJouer() {
-    const list = SONGS.filter(s => !s.hidden)
-      .slice().sort((a, b) => (LVL_ORDER[a.level] - LVL_ORDER[b.level]) || a.name.localeCompare(b.name, 'fr'));
-    const doneCount = list.filter(s => prog.songs[s.id]).length;
-    headSub.textContent = doneCount ? `${doneCount} / ${list.length} œuvres jouées` : 'Quatre œuvres, en entier';
-    const cards = list.map(s => {
-      const [title, author] = s.name.split(' · ');
-      return `
-      <button class="songcard ${prog.songs[s.id] ? 'songcard--done' : ''}" data-song="${s.id}" type="button">
-        <span class="songcard__icon">${s.icon}</span>
-        <span class="songcard__name">${title}</span>
-        <span class="songcard__author">${author || '&nbsp;'}</span>
-        <span class="songcard__meta"><span class="songcard__lvl" title="${s.level}">${lvlDots(s.level)}</span><span>${s.notes.length} notes · ${songDur(s)}</span>${prog.songs[s.id] ? '<span class="songcard__done">✓</span>' : ''}</span>
-      </button>`;
-    }).join('');
+    headSub.textContent = 'Joue en rythme, sur ton vrai piano';
+    stopPlayback();
+    Ear.onNote = null; Ear.onEvent = null;
+    const mine = data.scores.slice().reverse();
+    const cards = BUILTINS.map(sc => gameCard(sc)).join('');
+    const mineRows = mine.map(sc => gameCard(sc)).join('');
     stage.innerHTML = `
       <div class="songgrid">${cards}</div>
-      <p class="freeplay-hint">…ou joue librement, chaque touche sonne.</p>`;
-    stage.querySelectorAll('[data-song]').forEach(b => b.addEventListener('click', () => startSong(b.dataset.song)));
+      ${mine.length ? `<div class="col__label" style="margin:16px 0 8px">Mes partitions</div><div class="songgrid">${mineRows}</div>` : `<p class="freeplay-hint">Tes transcriptions de l'onglet Partition apparaîtront aussi ici.</p>`}`;
+    stage.querySelectorAll('[data-g]').forEach(el => el.addEventListener('click', () => {
+      const sc = BUILTINS.find(x => x.id === el.dataset.g) || data.scores.find(x => x.id === el.dataset.g);
+      if (sc) configGame(sc);
+    }));
+  }
+  function gameCard(sc) {
+    const best = data.best[sc.id];
+    const [title, author] = (sc.name || 'Partition').split(' · ');
+    const beats = sc.notes.length ? Math.max(...sc.notes.map(n => n.s + n.d)) : 0;
+    const sec = Math.round(beats * 60 / sc.bpm);
+    return `
+      <button class="songcard ${best ? 'songcard--done' : ''}" data-g="${sc.id}" type="button">
+        <span class="songcard__icon">${sc.icon || '𝄞'}</span>
+        <span class="songcard__name">${esc(title)}</span>
+        <span class="songcard__author">${esc(author || '')}&nbsp;</span>
+        <span class="songcard__meta"><span>${sc.notes.length} notes · ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}</span>${best ? `<span class="songcard__done">${'★'.repeat(best.stars)}</span>` : ''}</span>
+      </button>`;
   }
 
-  function startSong(id) {
-    const song = SONGS.find(s => s.id === id);
-    if (!song) return;
-    startSongObj(song, renderJouer, () => startSong(id));
-  }
-
-  // Version générale : accepte n'importe quel objet {name, icon, notes[, id]}
-  // — y compris les partitions enregistrées par l'utilisateur.
-  function startSongObj(song, onBack, onAgain) {
-    let i = 0;
-    headSub.textContent = 'Mélodie guidée';
-    const draw = () => {
-      const done = i >= song.notes.length;
-      stage.innerHTML = `
-        <div class="card session">
-          <div class="session__eyebrow">${song.icon} Mélodie guidée</div>
-          <div class="session__title">${song.name}</div>
-          ${done
-            ? `<div class="bravo"><div class="bravo__emoji">🎉</div><div class="session__text"><strong>Bravo !</strong> Mélodie jouée en entier.</div></div>`
-            : `<div class="session__text">Note <strong>${i + 1} / ${song.notes.length}</strong> — joue la touche qui brille.</div>`}
-          <div class="session__progress"><i style="width:${Math.round(i / song.notes.length * 100)}%"></i></div>
-          <div class="session__row">
-            ${done ? `<button class="btn btn--ghost btn--small" data-full type="button">🔊 Réécouter</button>` : `<button class="btn btn--ghost btn--small" data-hear type="button">Écouter la suite</button>`}
-            <button class="btn btn--ghost btn--small" data-quit type="button">${done ? 'Retour' : 'Quitter'}</button>
-            ${done ? `<button class="btn btn--small" data-again type="button">Rejouer</button>` : ''}
-          </div>
-        </div>`;
-      stage.querySelector('[data-quit]')?.addEventListener('click', () => { noteHandler = null; clearMarks(); onBack(); });
-      stage.querySelector('[data-again]')?.addEventListener('click', () => (onAgain ? onAgain() : startSongObj(song, onBack, onAgain)));
-      stage.querySelector('[data-hear]')?.addEventListener('click', () => {
-        // fait entendre les 5 prochaines notes, au rythme et au tempo de l'œuvre
-        const tempo = song.tempo || 0.45;
-        let t = 0;
-        song.notes.slice(i, i + 5).forEach((m, k) => {
-          playNote(m, 0.6, 0.7, t);
-          t += tempo * ((song.beats && song.beats[i + k]) || 1);
-        });
-      });
-      stage.querySelector('[data-full]')?.addEventListener('click', () => {
-        // le morceau en entier, comme il s'écoute
-        const tempo = song.tempo || 0.45;
-        let t = 0;
-        song.notes.forEach((m, k) => {
-          playNote(m, 0.7, 0.75, t);
-          t += tempo * ((song.beats && song.beats[k]) || 1);
-        });
-      });
-      clearMarks();
-      if (!done) {
-        ensureVisible(song.notes[i]);
-        mark([song.notes[i]], 'hint');
-      } else {
-        if (song.id) { prog.songs[song.id] = true; saveProg(); }
-        noteHandler = null;
-      }
-    };
-    noteHandler = (midi) => {
-      if (i >= song.notes.length) return;
-      if (midi === song.notes[i]) { flashKey(midi, 'good'); i++; draw(); }
-      else flashKey(midi, 'bad');
-    };
-    draw();
-  }
-
-  // ================= APPRENDRE =================
-  const LESSONS = [
-    { id: 'l1', level: 'Néophyte', name: 'Repérer Do', desc: 'Le groupe de 2 touches noires, ton point d\'ancrage',
-      steps: [
-        { type: 'info', text: 'Regarde les touches noires : elles vont par <strong>groupes de 2 et de 3</strong>. La touche blanche juste à gauche d\'un groupe de 2 noires est toujours un <strong>Do</strong>.', show: [60], cls: 'root' },
-        { type: 'find', text: 'Trouve et joue <strong>3 Do différents</strong> sur le clavier.', targetPc: 0, count: 3 },
-      ] },
-    { id: 'l2', level: 'Néophyte', name: 'Les 7 notes', desc: 'Do Ré Mi Fa Sol La Si — et ça recommence',
-      steps: [
-        { type: 'info', text: 'Les touches blanches se nomment <strong>Do Ré Mi Fa Sol La Si</strong>, puis la série recommence une octave plus haut. Regarde-les s\'illuminer.', show: [60, 62, 64, 65, 67, 69, 71], cls: 'show', play: true },
-        { type: 'seq', text: 'À toi : joue <strong>Do Ré Mi Fa Sol</strong> dans l\'ordre.', notes: [60, 62, 64, 65, 67] },
-        { type: 'seq', text: 'Et maintenant en redescendant : <strong>Sol Fa Mi Ré Do</strong>.', notes: [67, 65, 64, 62, 60] },
-      ] },
-    { id: 'l3', level: 'Néophyte', name: 'La position à 5 doigts', desc: 'Pouce sur Do, un doigt par touche',
-      steps: [
-        { type: 'info', text: 'Pose ta main droite : <strong>pouce (1) sur Do</strong>, puis un doigt par touche jusqu\'à <strong>l\'auriculaire (5) sur Sol</strong>. C\'est LA position de départ du pianiste.', show: [60, 62, 64, 65, 67], cls: 'show', fingers: ['1', '2', '3', '4', '5'] },
-        { type: 'seq', text: 'Joue <strong>1-3-5</strong> (Do, Mi, Sol) sans bouger la main.', notes: [60, 64, 67] },
-        { type: 'seq', text: 'Le petit défi : <strong>1-3-2-4-3-5</strong>.', notes: [60, 64, 62, 65, 64, 67] },
-      ] },
-    { id: 'l4', level: 'Néophyte', name: 'Ta première mélodie', desc: 'Au clair de la lune, guidée note à note',
-      steps: [
-        { type: 'song', text: 'Tout est prêt : joue <strong>Au clair de la lune</strong> en suivant la touche qui brille.', song: 'lune' },
-      ] },
-    { id: 'l5', level: 'Débutant', name: 'Les touches noires', desc: 'Dièses et bémols — la même touche, deux noms',
-      steps: [
-        { type: 'info', text: 'Une touche noire prend le nom de sa voisine : à droite de Fa, c\'est <strong>Fa♯</strong> (fa dièse) ; à gauche de Sol, c\'est <strong>Sol♭</strong> (sol bémol). <strong>C\'est la même touche !</strong>', show: [66], cls: 'root' },
-        { type: 'find', text: 'Trouve et joue <strong>2 Fa♯</strong> (le 1ᵉʳ du groupe de 3 noires).', targetPc: 6, count: 2 },
-        { type: 'find', text: 'Trouve <strong>2 Do♯</strong> (le 1ᵉʳ du groupe de 2 noires).', targetPc: 1, count: 2 },
-      ] },
-    { id: 'l6', level: 'Débutant', name: 'Ton premier accord', desc: 'Do majeur — trois notes qui sonnent ensemble',
-      steps: [
-        { type: 'info', text: 'Un accord = plusieurs notes ensemble. <strong>Do majeur</strong> = Do + Mi + Sol (doigts 1-3-5). Écoute-le.', show: [60, 64, 67], cls: 'show', fingers: ['1', '3', '5'], playChord: true },
-        { type: 'chord', text: 'Joue les 3 notes de <strong>Do majeur</strong> — ensemble ou l\'une après l\'autre.', notes: [60, 64, 67] },
-        { type: 'chord', text: 'Même forme, décalée : <strong>Fa majeur</strong> (Fa-La-Do).', notes: [65, 69, 72] },
-        { type: 'chord', text: 'Et <strong>Sol majeur</strong> (Sol-Si-Ré).', notes: [67, 71, 74] },
-      ] },
-    { id: 'l7', level: 'Débutant', name: 'La gamme de Do majeur', desc: 'Le passage du pouce, geste fondateur',
-      steps: [
-        { type: 'info', text: 'Pour monter 8 notes avec 5 doigts, le <strong>pouce passe sous le majeur</strong> après Mi : doigté <strong>1-2-3-1-2-3-4-5</strong>.', show: [60, 62, 64, 65, 67, 69, 71, 72], cls: 'show', fingers: ['1', '2', '3', '1', '2', '3', '4', '5'], play: true },
-        { type: 'seq', text: 'Monte la gamme complète : <strong>Do → Do</strong>.', notes: [60, 62, 64, 65, 67, 69, 71, 72] },
-        { type: 'seq', text: 'Redescends : <strong>Do → Do</strong> (doigté 5-4-3-2-1-3-2-1).', notes: [72, 71, 69, 67, 65, 64, 62, 60] },
-      ] },
-    { id: 'l8', level: 'Confirmé', name: 'Majeur vs mineur', desc: 'Une note change tout : la tierce',
-      steps: [
-        { type: 'info', text: 'Baisse la note du milieu d\'un demi-ton et l\'accord devient <strong>mineur</strong> — la couleur triste. Do majeur : Do-Mi-Sol. <strong>Do mineur : Do-Mi♭-Sol</strong>.', show: [60, 63, 67], cls: 'show', playChord: true },
-        { type: 'chord', text: 'Joue <strong>La mineur</strong> (La-Do-Mi) — l\'accord mineur le plus utilisé.', notes: [57, 60, 64] },
-        { type: 'chord', text: 'Puis <strong>Ré mineur</strong> (Ré-Fa-La).', notes: [62, 65, 69] },
-        { type: 'chord', text: 'Et <strong>Mi mineur</strong> (Mi-Sol-Si).', notes: [64, 67, 71] },
-      ] },
-    { id: 'l9', level: 'Confirmé', name: 'La suite magique', desc: 'Do — Sol — La m — Fa : la moitié de la pop mondiale',
-      steps: [
-        { type: 'info', text: 'Ces 4 accords enchaînés (<strong>I-V-vi-IV</strong>) portent des centaines de tubes. Écoute l\'enchaînement.', show: [60, 64, 67], cls: 'show', progression: [[60, 64, 67], [55, 59, 62], [57, 60, 64], [53, 57, 60]] },
-        { type: 'chord', text: '1/4 — <strong>Do majeur</strong> (Do-Mi-Sol).', notes: [60, 64, 67] },
-        { type: 'chord', text: '2/4 — <strong>Sol majeur</strong> (Sol-Si-Ré, en dessous).', notes: [55, 59, 62] },
-        { type: 'chord', text: '3/4 — <strong>La mineur</strong> (La-Do-Mi).', notes: [57, 60, 64] },
-        { type: 'chord', text: '4/4 — <strong>Fa majeur</strong> (Fa-La-Do). Enchaîne les 4 en boucle : tu accompagnes déjà.', notes: [53, 57, 60] },
-      ] },
-    { id: 'l10', level: 'Confirmé', name: 'Improviser sans faute', desc: 'La gamme pentatonique, terrain de jeu sûr',
-      steps: [
-        { type: 'info', text: 'La <strong>penta majeure de Do</strong> (Do Ré Mi Sol La) : 5 notes qui sonnent toujours bien ensemble. Il n\'y a <strong>pas de fausse note</strong> dedans.', show: [60, 62, 64, 67, 69, 72], cls: 'show', play: true },
-        { type: 'seq', text: 'Monte-la une fois : <strong>Do Ré Mi Sol La Do</strong>.', notes: [60, 62, 64, 67, 69, 72] },
-        { type: 'free', text: '<strong>Improvise 12 notes</strong> en ne jouant QUE les touches illuminées. Écoute ce que ça raconte.', pool: [60, 62, 64, 67, 69, 72, 74, 76], count: 12 },
-      ] },
-  ];
-
-  function renderApprendre() {
-    headSub.textContent = 'Le parcours, pas à pas';
-    const done = Object.keys(prog.lessons).filter(k => prog.lessons[k]).length;
-    const rows = LESSONS.map((l, i) => `
-      <button class="lesson ${prog.lessons[l.id] ? 'lesson--done' : ''}" data-lesson="${l.id}" type="button">
-        <span class="lesson__num">${prog.lessons[l.id] ? '✓' : i + 1}</span>
-        <span class="lesson__main">
-          <span class="lesson__name">${l.name}</span>
-          <div class="lesson__desc">${l.desc}</div>
-        </span>
-        <span class="lesson__level">${l.level}</span>
-      </button>`).join('');
+  let game = null;
+  function configGame(sc) {
+    stopPlayback();
+    const best = data.best[sc.id];
     stage.innerHTML = `
-      <div class="learnhead">
-        <span class="learnhead__t">10 leçons</span>
-        <span class="learnhead__p">${done} / ${LESSONS.length} terminées</span>
-      </div>
-      <div class="lessons">${rows}</div>`;
-    stage.querySelectorAll('[data-lesson]').forEach(b => b.addEventListener('click', () => startLesson(b.dataset.lesson)));
+      <div class="card">
+        <div class="session__eyebrow">${sc.icon || '𝄞'} Prêt à jouer</div>
+        <div class="session__title">${esc(sc.name)}</div>
+        <div class="card__sub">Les notes défilent vers la ligne d'or — joue-les sur ton <strong>vrai piano</strong>, le micro valide. ${best ? `Record : ${best.pct} % ${'★'.repeat(best.stars)}` : ''}</div>
+        <div class="col__label" style="margin-top:14px">Tempo</div>
+        <div class="chiprow" id="gTempo">
+          <button class="chippick" data-m="0.5" type="button">Lent · 50 %</button>
+          <button class="chippick on" data-m="0.7" type="button">Tranquille · 70 %</button>
+          <button class="chippick" data-m="0.85" type="button">Presque · 85 %</button>
+          <button class="chippick" data-m="1" type="button">Réel · 100 %</button>
+        </div>
+        <div class="col__label" style="margin-top:12px">Mode</div>
+        <div class="chiprow" id="gMode">
+          <button class="chippick on" data-mode="rythme" type="button">En rythme 🎯</button>
+          <button class="chippick" data-mode="libre" type="button">Libre — l'app t'attend</button>
+        </div>
+        <label class="metrow"><input type="checkbox" id="gMetro" ${data.settings.metro ? 'checked' : ''}> Métronome pendant le jeu</label>
+        <div class="session__row" style="justify-content:flex-start">
+          <button class="btn" id="gStart" type="button">C'est parti</button>
+          <button class="btn btn--ghost btn--small" id="gHear" type="button">🔊 Écouter d'abord</button>
+          <button class="btn btn--ghost btn--small" id="gBack" type="button">Retour</button>
+        </div>
+      </div>`;
+    let mult = 0.7, mode = 'rythme';
+    $('gTempo').addEventListener('click', e => {
+      const b = e.target.closest('[data-m]'); if (!b) return;
+      mult = Number(b.dataset.m);
+      $('gTempo').querySelectorAll('.chippick').forEach(x => x.classList.toggle('on', x === b));
+    });
+    $('gMode').addEventListener('click', e => {
+      const b = e.target.closest('[data-mode]'); if (!b) return;
+      mode = b.dataset.mode;
+      $('gMode').querySelectorAll('.chippick').forEach(x => x.classList.toggle('on', x === b));
+    });
+    $('gHear').addEventListener('click', () => playScore(sc, mult));
+    $('gBack').addEventListener('click', renderJouer);
+    $('gStart').addEventListener('click', async () => {
+      data.settings.metro = $('gMetro').checked;
+      save();
+      try { await Ear.start(); }
+      catch { alert('Le micro est nécessaire — c\'est lui qui entend ton piano.'); return; }
+      startGame(sc, mult, mode, data.settings.metro);
+    });
   }
 
-  function startLesson(id) {
-    const lesson = LESSONS.find(l => l.id === id);
-    if (!lesson) return;
-    let si = 0;
-    headSub.textContent = lesson.level;
+  // Fenêtres de tolérance (état de l'art jeux de rythme) + compensation de
+  // la latence micro (~100 ms entre la frappe réelle et sa détection).
+  const LAT = 0.10, W_PERFECT = 0.16, W_GOOD = 0.34;
+  function startGame(sc, mult, mode, metro) {
+    stopPlayback();
+    const spb = 60 / (sc.bpm * mult);
+    const total = sc.notes.length;
+    stage.innerHTML = `
+      <div class="gamewrap">
+        <div class="gamehud">
+          <span class="ghud" id="gScore">0</span>
+          <span class="ghud ghud--combo" id="gCombo"></span>
+          <span class="ghud ghud--big" id="gNext">—</span>
+          <button class="btn btn--ghost btn--small" id="gQuit" type="button">Quitter</button>
+        </div>
+        <canvas id="gCanvas"></canvas>
+        <div class="gamebar"><i id="gProg"></i></div>
+      </div>`;
+    const canvas = $('gCanvas');
+    const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+    const wrapW = canvas.parentElement.clientWidth - 2;
+    const H = window.innerHeight > window.innerWidth ? 300 : Math.max(240, window.innerHeight - 230);
+    canvas.style.height = H + 'px';
+    canvas.width = wrapW * dpr; canvas.height = H * dpr;
+    const ctx2 = canvas.getContext('2d');
+    ctx2.scale(dpr, dpr);
+    const W = wrapW;
 
-    function stepDraw(extraState) {
-      const step = lesson.steps[si];
-      const finished = si >= lesson.steps.length;
-      if (finished) {
-        prog.lessons[id] = true;
-        saveProg();
-        noteHandler = null;
-        clearMarks();
-        stage.innerHTML = `
-          <div class="card session">
-            <div class="bravo"><div class="bravo__emoji">🎉</div></div>
-            <div class="session__title">Leçon terminée !</div>
-            <div class="session__text"><strong>${lesson.name}</strong> — c'est acquis.</div>
-            <div class="session__row">
-              <button class="btn btn--ghost btn--small" data-back type="button">Retour aux leçons</button>
-              ${LESSONS.indexOf(lesson) < LESSONS.length - 1 ? `<button class="btn btn--small" data-next type="button">Leçon suivante</button>` : ''}
-            </div>
-          </div>`;
-        stage.querySelector('[data-back]').addEventListener('click', renderApprendre);
-        stage.querySelector('[data-next]')?.addEventListener('click', () => startLesson(LESSONS[LESSONS.indexOf(lesson) + 1].id));
+    const lo = Math.min(...sc.notes.map(n => n.m)) - 1;
+    const hi = Math.max(...sc.notes.map(n => n.m)) + 1;
+    const laneH = H / (hi - lo + 1);
+    const yFor = (m) => H - (m - lo + 0.5) * laneH;
+    const PXB = Math.max(60, Math.min(110, spb >= 0.5 ? 80 : 110));
+    const hitX = Math.round(W * 0.18);
+
+    const st = {
+      notes: sc.notes.map(n => ({ ...n, state: 0 })),   // 0 à venir, 1 parfait, 2 bien, 3 raté
+      score: 0, combo: 0, maxCombo: 0, perfects: 0, goods: 0,
+      startT: audio().currentTime + 4 * spb + 0.2,      // 4 temps de décompte
+      done: false, idx: 0, waitPos: 0, waiting: false, raf: 0, lastBeatTick: -1,
+    };
+    game = st;
+    // décompte
+    for (let i = 0; i < 4; i++) click(i === 0, (st.startT - audio().currentTime) - (4 - i) * spb);
+
+    const beatsTotal = Math.max(...st.notes.map(n => n.s + n.d));
+    const posNow = () => {
+      if (mode === 'libre') return st.waitPos;
+      return (actx.currentTime - st.startT) / spb;
+    };
+
+    Ear.onEvent = null;
+    Ear.onNote = (midi, t) => {
+      if (st.done) return;
+      const tBeat = (t - LAT - st.startT) / spb;
+      if (mode === 'libre') {
+        const next = st.notes.find(n => n.state === 0);
+        if (next && next.m === midi) {
+          next.state = 1; st.perfects++; st.combo++; st.maxCombo = Math.max(st.maxCombo, st.combo);
+          st.score += 100;
+          st.waiting = false;
+        } else if (next) { st.combo = 0; flashWrong(); }
         return;
       }
-      stage.innerHTML = `
-        <div class="card session">
-          <div class="session__eyebrow">Leçon — ${lesson.name}</div>
-          <div class="session__text" style="margin-top:10px">${step.text}</div>
-          <div class="session__feedback session__feedback--good" data-fb-line>${extraState || ''}</div>
-          <div class="session__progress"><i style="width:${Math.round(si / lesson.steps.length * 100)}%"></i></div>
-          <div class="session__row">
-            <button class="btn btn--ghost btn--small" data-quit type="button">Quitter</button>
-            ${step.type === 'info' ? `<button class="btn btn--small" data-next type="button">J'ai vu — suite</button>` : ''}
-            ${(step.play || step.playChord || step.progression) ? `<button class="btn btn--ghost btn--small" data-listen type="button">Réécouter</button>` : ''}
-          </div>
-        </div>`;
-      stage.querySelector('[data-quit]').addEventListener('click', () => { noteHandler = null; clearMarks(); renderApprendre(); });
-      stage.querySelector('[data-next]')?.addEventListener('click', () => { si++; stepDraw(); });
-      const listen = () => {
-        if (step.progression) step.progression.forEach((ch, i) => setTimeout(() => playChordNotes(ch), i * 750));
-        else if (step.playChord) playChordNotes(step.show);
-        else if (step.play) step.show.forEach((m, i) => playNote(m, 0.55, 0.7, i * 0.38));
-      };
-      stage.querySelector('[data-listen]')?.addEventListener('click', listen);
-
-      // Prépare le clavier + le handler du pas
-      clearMarks();
-      if (step.show) {
-        ensureVisible(step.show[0]);
-        mark(step.show, step.cls || 'show', step.fingers);
-        if (step.play || step.playChord || step.progression) setTimeout(listen, 350);
+      // en rythme : la note attendue la plus proche, même hauteur, non jouée
+      let best = null, bestDt = 1e9;
+      for (const n of st.notes) {
+        if (n.state !== 0 || n.m !== midi) continue;
+        const dt = Math.abs(tBeat - n.s) * spb;
+        if (dt < bestDt) { bestDt = dt; best = n; }
       }
-
-      if (step.type === 'find') {
-        // Le compteur vit dans la fermeture — le feedback met à jour la ligne
-        // sans re-rendre le pas (un re-rendu remettait la progression à zéro).
-        const found = new Set();
-        const fb = () => { const el = stage.querySelector('[data-fb-line]'); if (el) el.textContent = `${found.size} / ${step.count} — continue !`; };
-        noteHandler = (midi) => {
-          if (midi % 12 === step.targetPc && !found.has(midi)) {
-            found.add(midi);
-            flashKey(midi, 'good');
-            if (found.size >= step.count) { si++; setTimeout(() => stepDraw(), 350); }
-            else fb();
-          } else if (midi % 12 !== step.targetPc) flashKey(midi, 'bad');
-        };
-      } else if (step.type === 'seq') {
-        let i = 0;
-        ensureVisible(step.notes[0]);
-        mark([step.notes[0]], 'hint');
-        noteHandler = (midi) => {
-          if (midi === step.notes[i]) {
-            flashKey(midi, 'good');
-            i++;
-            if (i >= step.notes.length) { si++; setTimeout(() => stepDraw(), 350); }
-            else { clearMarks(); ensureVisible(step.notes[i]); mark([step.notes[i]], 'hint'); }
-          } else flashKey(midi, 'bad');
-        };
-      } else if (step.type === 'chord') {
-        const want = new Set(step.notes);
-        const got = new Set();
-        ensureVisible(step.notes[0]);
-        mark(step.notes, 'hint');
-        noteHandler = (midi) => {
-          if (want.has(midi)) {
-            got.add(midi);
-            flashKey(midi, 'good');
-            if (got.size >= want.size) {
-              setTimeout(() => playChordNotes(step.notes), 150);
-              si++; setTimeout(() => stepDraw(), 550);
-            }
-          } else { got.clear(); flashKey(midi, 'bad'); }
-        };
-      } else if (step.type === 'free') {
-        let n = 0;
-        const pool = new Set(step.pool);
-        ensureVisible(step.pool[0]);
-        mark(step.pool, 'show');
-        noteHandler = (midi) => {
-          if (pool.has(midi)) {
-            n++;
-            if (n >= step.count) { si++; setTimeout(() => stepDraw(), 300); }
-            else { const el = stage.querySelector('[data-fb-line]'); if (el) el.textContent = `${n} / ${step.count} notes — laisse venir…`; }
-          } else flashKey(midi, 'bad');
-        };
-      } else if (step.type === 'song') {
-        noteHandler = null;
-        startSongInLesson(step.song, () => { si++; stepDraw(); }, () => { noteHandler = null; clearMarks(); renderApprendre(); });
+      if (best && bestDt <= W_GOOD) {
+        best.state = bestDt <= W_PERFECT ? 1 : 2;
+        if (best.state === 1) { st.perfects++; st.score += 100; } else { st.goods++; st.score += 60; }
+        st.combo++; st.maxCombo = Math.max(st.maxCombo, st.combo);
+        st.score += Math.min(50, st.combo * 2);
+      } else {
+        st.combo = 0; flashWrong();
       }
-    }
-    stepDraw();
-  }
-
-  function startSongInLesson(songId, onDone, onQuit) {
-    const song = SONGS.find(s => s.id === songId);
-    let i = 0;
-    const draw = () => {
-      stage.innerHTML = `
-        <div class="card session">
-          <div class="session__eyebrow">${song.icon} ${song.name}</div>
-          <div class="session__text">Note <strong>${i + 1} / ${song.notes.length}</strong> — suis la touche qui brille.</div>
-          <div class="session__progress"><i style="width:${Math.round(i / song.notes.length * 100)}%"></i></div>
-          <div class="session__row"><button class="btn btn--ghost btn--small" data-quit type="button">Quitter</button></div>
-        </div>`;
-      stage.querySelector('[data-quit]').addEventListener('click', onQuit);
-      clearMarks();
-      ensureVisible(song.notes[i]);
-      mark([song.notes[i]], 'hint');
     };
-    noteHandler = (midi) => {
-      if (midi === song.notes[i]) {
-        flashKey(midi, 'good');
-        i++;
-        if (i >= song.notes.length) { prog.songs[songId] = true; saveProg(); noteHandler = null; onDone(); }
-        else draw();
-      } else flashKey(midi, 'bad');
-    };
-    draw();
-  }
+    let wrongFlash = 0;
+    function flashWrong() { wrongFlash = actx.currentTime; }
 
-  // ================= ENTRAÎNER =================
-  function renderEntrainer() {
-    headSub.textContent = 'Des jeux courts, un niveau qui monte';
-    const best = prog.best;
-    stage.innerHTML = `
-      <div class="games">
-        <button class="game" data-game="note" type="button">
-          <div class="game__icon">🎯</div>
-          <div class="game__name">Trouve la note</div>
-          <div class="game__desc">Un nom s'affiche, joue la bonne touche.</div>
-          <div class="game__best">${best.note ? 'Record : ' + best.note + ' d\'affilée' : 'Pas encore joué'}</div>
-        </button>
-        <button class="game" data-game="chord" type="button">
-          <div class="game__icon">🎹</div>
-          <div class="game__name">Quel accord ?</div>
-          <div class="game__desc">Écoute et regarde — majeur, mineur… ?</div>
-          <div class="game__best">${best.chord ? 'Record : ' + best.chord + ' d\'affilée' : 'Pas encore joué'}</div>
-        </button>
-        <button class="game" data-game="ear" type="button">
-          <div class="game__icon">👂</div>
-          <div class="game__name">L'oreille</div>
-          <div class="game__desc">Deux notes — quel intervalle les sépare ?</div>
-          <div class="game__best">${best.ear ? 'Record : ' + best.ear + ' d\'affilée' : 'Pas encore joué'}</div>
-        </button>
-        <button class="game" data-game="rush" type="button">
-          <div class="game__icon">⚡</div>
-          <div class="game__name">Note rush</div>
-          <div class="game__desc">30 secondes, un max de notes trouvées.</div>
-          <div class="game__best">${best.rush ? 'Record : ' + best.rush + ' notes' : 'Pas encore joué'}</div>
-        </button>
-      </div>`;
-    stage.querySelectorAll('[data-game]').forEach(b => b.addEventListener('click', () => startGame(b.dataset.game)));
-    if (tab === 'studio') injectStudioSeg();
-  }
-
-  const randInt = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
-
-  function startGame(kind) {
-    let streakN = 0;
-    if (kind === 'note' || kind === 'rush') {
-      const rush = kind === 'rush';
-      let target = null, score = 0, deadline = 0, timer = null;
-      const next = () => {
-        target = randInt(rush ? octaveBase : 55, rush ? octaveBase + 23 : 72);
-        draw();
-      };
-      const draw = () => {
-        const left = rush ? Math.max(0, Math.ceil((deadline - Date.now()) / 1000)) : null;
-        stage.innerHTML = `
-          <div class="card session">
-            <div class="session__eyebrow">${rush ? '⚡ Note rush' : '🎯 Trouve la note'}</div>
-            <div class="session__big">${noteName(target, true)}</div>
-            <div class="session__feedback" data-fb></div>
-            <div class="quiz-score">
-              <span>${rush ? 'Score : ' : 'Série : '}<b>${rush ? score : streakN}</b></span>
-              ${rush ? `<span>Temps : <b>${left}s</b></span>` : `<span>Record : <b>${prog.best[kind] || 0}</b></span>`}
-            </div>
-            <div class="session__row"><button class="btn btn--ghost btn--small" data-quit type="button">Quitter</button></div>
-          </div>`;
-        stage.querySelector('[data-quit]').addEventListener('click', () => {
-          clearInterval(timer);
-          noteHandler = null;
-          renderEntrainer();
-        });
-      };
-      if (rush) {
-        deadline = Date.now() + 30000;
-        timer = setInterval(() => {
-          if (Date.now() >= deadline) {
-            clearInterval(timer);
-            noteHandler = null;
-            if (score > (prog.best.rush || 0)) { prog.best.rush = score; saveProg(); }
-            stage.innerHTML = `
-              <div class="card session">
-                <div class="bravo"><div class="bravo__emoji">⚡</div></div>
-                <div class="session__title">${score} note${score > 1 ? 's' : ''} en 30 s</div>
-                <div class="session__text">${score >= (prog.best.rush || 0) ? '<strong>Nouveau record !</strong>' : 'Record : ' + (prog.best.rush || 0)}</div>
-                <div class="session__row">
-                  <button class="btn btn--ghost btn--small" data-quit type="button">Retour</button>
-                  <button class="btn btn--small" data-again type="button">Rejouer</button>
-                </div>
-              </div>`;
-            stage.querySelector('[data-quit]').addEventListener('click', renderEntrainer);
-            stage.querySelector('[data-again]').addEventListener('click', () => startGame('rush'));
-          } else draw();
-        }, 500);
+    function draw() {
+      const pos = posNow();
+      // libre : la partition avance jusqu'à la prochaine note, puis t'attend
+      if (mode === 'libre') {
+        const next = st.notes.find(n => n.state === 0);
+        if (next) {
+          st.waitPos = Math.min(st.waitPos + 0.035, next.s);
+          st.waiting = st.waitPos >= next.s - 0.001;
+        } else st.waitPos += 0.035;
       }
-      noteHandler = (midi) => {
-        if (!target) return;
-        if (midi % 12 === target % 12 && (!rush ? midi === target : true)) {
-          flashKey(midi, 'good');
-          if (rush) score++;
-          else {
-            streakN++;
-            if (streakN > (prog.best.note || 0)) { prog.best.note = streakN; saveProg(); }
-          }
-          next();
-        } else {
-          flashKey(midi, 'bad');
-          if (!rush) { streakN = 0; draw(); }
+      // rythme : marquer les ratées + métronome
+      if (mode === 'rythme') {
+        for (const n of st.notes) {
+          if (n.state === 0 && (pos - n.s) * spb > W_GOOD) { n.state = 3; st.combo = 0; }
         }
-      };
-      next();
-      return;
-    }
+        const beatIdx = Math.floor(pos);
+        if (metro && beatIdx > st.lastBeatTick && pos >= 0 && beatIdx <= beatsTotal) {
+          st.lastBeatTick = beatIdx;
+          click(beatIdx % (sc.bpb || 4) === 0);
+        }
+      }
+      // HUD
+      $('gScore').textContent = st.score;
+      $('gCombo').textContent = st.combo >= 3 ? '×' + st.combo : '';
+      const next = st.notes.find(n => n.state === 0 && n.s >= pos - 0.5) || st.notes.find(n => n.state === 0);
+      $('gNext').textContent = next ? noteName(next.m) : '';
+      $('gProg').style.width = Math.min(100, Math.max(0, pos / beatsTotal * 100)) + '%';
 
-    if (kind === 'chord') {
-      const KINDS = ['Majeur', 'Mineur', 'Dim', 'Sus4', '7'];
-      let answer = null, notes = null;
-      const next = () => {
-        const root = randInt(55, 67);
-        answer = KINDS[randInt(0, KINDS.length - 1)];
-        notes = CHORDS[answer].iv.map(i => root + i);
-        clearMarks();
-        ensureVisible(root);
-        mark(notes, 'show');
-        setTimeout(() => playChordNotes(notes), 300);
-        const opts = [...KINDS].sort(() => Math.random() - 0.5);
-        stage.innerHTML = `
-          <div class="card session">
-            <div class="session__eyebrow">🎹 Quel accord ?</div>
-            <div class="session__text">Écoute et regarde le clavier…</div>
-            <div class="quiz-choices">${opts.map(o => `<button class="choice" data-c="${o}" type="button">${o}</button>`).join('')}</div>
-            <div class="quiz-score"><span>Série : <b>${streakN}</b></span><span>Record : <b>${prog.best.chord || 0}</b></span></div>
-            <div class="session__row">
-              <button class="btn btn--ghost btn--small" data-listen type="button">Réécouter</button>
-              <button class="btn btn--ghost btn--small" data-quit type="button">Quitter</button>
-            </div>
-          </div>`;
-        stage.querySelector('[data-quit]').addEventListener('click', () => { noteHandler = null; clearMarks(); renderEntrainer(); });
-        stage.querySelector('[data-listen]').addEventListener('click', () => playChordNotes(notes));
-        stage.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => {
-          if (b.dataset.c === answer) {
-            b.classList.add('choice--good');
-            streakN++;
-            if (streakN > (prog.best.chord || 0)) { prog.best.chord = streakN; saveProg(); }
-            setTimeout(next, 550);
-          } else {
-            b.classList.add('choice--bad');
-            stage.querySelector(`[data-c="${answer}"]`)?.classList.add('choice--good');
-            streakN = 0;
-            setTimeout(next, 1100);
-          }
-        }));
-      };
-      next();
-      return;
+      // scène
+      ctx2.clearRect(0, 0, W, H);
+      for (let m = lo; m <= hi; m++) {
+        if (BLACK.has(m % 12)) { ctx2.fillStyle = 'rgba(255,255,255,0.035)'; ctx2.fillRect(0, yFor(m) - laneH / 2, W, laneH); }
+        if (m % 12 === 0) { ctx2.strokeStyle = 'rgba(217,179,106,0.25)'; ctx2.beginPath(); ctx2.moveTo(0, yFor(m) + laneH / 2); ctx2.lineTo(W, yFor(m) + laneH / 2); ctx2.stroke(); }
+      }
+      // ligne d'or
+      ctx2.fillStyle = wrongFlash && actx.currentTime - wrongFlash < 0.18 ? 'rgba(226,109,92,0.8)' : 'rgba(217,179,106,0.9)';
+      ctx2.fillRect(hitX - 2, 0, 3, H);
+      // notes
+      const colors = ['#7D88C4', '#D9B36A', '#6FBF8F', 'rgba(226,109,92,0.45)'];
+      for (const n of st.notes) {
+        const x = hitX + (n.s - pos) * PXB;
+        const wN = Math.max(14, n.d * PXB - 4);
+        if (x + wN < -20 || x > W + 20) continue;
+        const y = yFor(n.m);
+        ctx2.fillStyle = colors[n.state];
+        ctx2.beginPath();
+        const nh = Math.min(laneH * 0.88, 22), ny = y - nh / 2;
+        if (ctx2.roundRect) ctx2.roundRect(x, ny, wN, nh, 6);
+        else ctx2.rect(x, ny, wN, nh);
+        ctx2.fill();
+        if (laneH > 13 || n.state === 0) {
+          ctx2.fillStyle = n.state === 0 ? 'rgba(255,255,255,0.85)' : 'rgba(11,11,18,0.75)';
+          ctx2.font = '600 10px Inter, sans-serif';
+          ctx2.fillText(FR[n.m % 12], x + 4, y + 3.5);
+        }
+      }
+      // décompte
+      if (mode === 'rythme' && pos < 0) {
+        ctx2.fillStyle = 'rgba(217,179,106,0.95)';
+        ctx2.font = '700 44px Inter, sans-serif';
+        ctx2.textAlign = 'center';
+        ctx2.fillText(String(Math.max(1, Math.ceil(-pos))), W / 2, H / 2 + 14);
+        ctx2.textAlign = 'left';
+      }
+      // fin ?
+      const allDone = st.notes.every(n => n.state !== 0);
+      const timeOver = mode === 'rythme' && pos > beatsTotal + 2;
+      if (allDone || timeOver) { endGame(sc, mult, mode, st); return; }
+      st.raf = requestAnimationFrame(draw);
     }
-
-    if (kind === 'ear') {
-      const INTERVALS = [
-        [2, 'Seconde (Do→Ré)'], [4, 'Tierce majeure (Do→Mi)'], [5, 'Quarte (Do→Fa)'],
-        [7, 'Quinte (Do→Sol)'], [12, 'Octave (Do→Do)'],
-      ];
-      let answer = null, base = null;
-      const next = () => {
-        base = randInt(55, 67);
-        answer = INTERVALS[randInt(0, INTERVALS.length - 1)];
-        const hear = () => { playNote(base, 0.8, 0.8); playNote(base + answer[0], 0.8, 0.8, 0.85); };
-        setTimeout(hear, 300);
-        const opts = [...INTERVALS].sort(() => Math.random() - 0.5);
-        stage.innerHTML = `
-          <div class="card session">
-            <div class="session__eyebrow">👂 L'oreille</div>
-            <div class="session__text">Deux notes montantes — quel <strong>intervalle</strong> ?</div>
-            <div class="quiz-choices">${opts.map(o => `<button class="choice" data-i="${o[0]}" type="button">${o[1].split(' (')[0]}</button>`).join('')}</div>
-            <div class="quiz-score"><span>Série : <b>${streakN}</b></span><span>Record : <b>${prog.best.ear || 0}</b></span></div>
-            <div class="session__row">
-              <button class="btn btn--ghost btn--small" data-listen type="button">Réécouter</button>
-              <button class="btn btn--ghost btn--small" data-quit type="button">Quitter</button>
-            </div>
-          </div>`;
-        stage.querySelector('[data-quit]').addEventListener('click', () => { noteHandler = null; renderEntrainer(); });
-        stage.querySelector('[data-listen]').addEventListener('click', hear);
-        stage.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => {
-          if (Number(b.dataset.i) === answer[0]) {
-            b.classList.add('choice--good');
-            streakN++;
-            if (streakN > (prog.best.ear || 0)) { prog.best.ear = streakN; saveProg(); }
-            setTimeout(next, 550);
-          } else {
-            b.classList.add('choice--bad');
-            stage.querySelector(`[data-i="${answer[0]}"]`)?.classList.add('choice--good');
-            streakN = 0;
-            setTimeout(next, 1100);
-          }
-        }));
-      };
-      next();
-      return;
-    }
+    $('gQuit').addEventListener('click', () => { st.done = true; cancelAnimationFrame(st.raf); Ear.onNote = null; configGame(sc); });
+    st.raf = requestAnimationFrame(draw);
   }
 
-  // ================= DICO =================
-  let dicoView = 'accords';
-  let dicoRoot = 0, dicoChord = 'Majeur', dicoScale = 'Majeure', cofSel = 0;
-
-  function renderDico() {
-    headSub.textContent = 'Accords, gammes, tonalités';
-    const tabs = `
-      <div class="dico-tabs">
-        <button class="dico-tab ${dicoView === 'accords' ? 'dico-tab--on' : ''}" data-v="accords" type="button">Accords</button>
-        <button class="dico-tab ${dicoView === 'gammes' ? 'dico-tab--on' : ''}" data-v="gammes" type="button">Gammes</button>
-        <button class="dico-tab ${dicoView === 'quintes' ? 'dico-tab--on' : ''}" data-v="quintes" type="button">Cycle des quintes</button>
-      </div>`;
-
-    if (dicoView === 'quintes') {
-      stage.innerHTML = tabs + renderCof();
-      wireDicoTabs();
-      wireCof();
-      if (tab === 'studio') injectStudioSeg();
-      return;
-    }
-
-    const names = prog.labels === 'en' ? EN : FR;
-    const roots = names.map((n, i) => `<button class="pill pill--small ${i === dicoRoot ? 'pill--on' : ''}" data-root="${i}" type="button">${n}</button>`).join('');
-    const kinds = dicoView === 'accords'
-      ? Object.keys(CHORDS).map(k => `<button class="pill ${k === dicoChord ? 'pill--on' : ''}" data-kind="${k}" type="button">${k}</button>`).join('')
-      : Object.keys(SCALES).map(k => `<button class="pill ${k === dicoScale ? 'pill--on' : ''}" data-kind="${k}" type="button">${k}</button>`).join('');
-
-    const base = 60 + dicoRoot;
-    const iv = dicoView === 'accords' ? CHORDS[dicoChord].iv : SCALES[dicoScale].iv;
-    const midis = iv.map(i => base + i);
-    if (dicoView === 'gammes') midis.push(base + 12);
-    const noteStr = midis.map(m => names[m % 12]).join(' · ');
-    const label = dicoView === 'accords'
-      ? names[dicoRoot] + (CHORDS[dicoChord].suffix ? ' ' + CHORDS[dicoChord].suffix : ' majeur')
-      : names[dicoRoot] + ' — ' + dicoScale.toLowerCase();
-
-    stage.innerHTML = tabs + `
-      <div class="card">
-        <div class="pills" style="margin-bottom:10px">${roots}</div>
-        <div class="pills">${kinds}</div>
-        <div class="dico-result">
-          <div class="dico-result__name">${label}</div>
-          <div class="dico-result__notes">${noteStr}</div>
-          ${dicoView === 'gammes' ? `<div class="dico-result__hint">${SCALES[dicoScale].hint}</div>` : ''}
-          <div class="session__row">
-            <button class="btn btn--small" data-hear type="button">Écouter</button>
-          </div>
+  function endGame(sc, mult, mode, st) {
+    st.done = true;
+    cancelAnimationFrame(st.raf);
+    Ear.onNote = null;
+    const total = sc.notes.length;
+    const hit = st.perfects + st.goods;
+    const pct = Math.round(hit / total * 100);
+    const stars = pct >= 95 ? 3 : pct >= 75 ? 2 : pct >= 45 ? 1 : 0;
+    const prev = data.best[sc.id];
+    if (mode === 'rythme' && (!prev || pct > prev.pct)) { data.best[sc.id] = { pct, stars, mult }; save(); }
+    stage.innerHTML = `
+      <div class="card session">
+        <div class="session__eyebrow">${sc.icon || '𝄞'} ${esc(sc.name)}</div>
+        <div class="gstars">${'★'.repeat(stars)}${'☆'.repeat(3 - stars)}</div>
+        <div class="session__big">${pct} %</div>
+        <div class="session__text">
+          ${st.perfects} parfaites · ${st.goods} bien · ${total - hit} manquées<br>
+          Meilleure série : ${st.maxCombo} — score ${st.score}${mode === 'libre' ? ' (mode libre)' : ''}
+        </div>
+        <div class="session__row">
+          <button class="btn" data-r="again" type="button">Rejouer</button>
+          <button class="btn btn--ghost btn--small" data-r="cfg" type="button">Régler</button>
+          <button class="btn btn--ghost btn--small" data-r="list" type="button">Autres œuvres</button>
         </div>
       </div>`;
-    wireDicoTabs();
-    stage.querySelectorAll('[data-root]').forEach(b => b.addEventListener('click', () => { dicoRoot = Number(b.dataset.root); renderDico(); }));
-    stage.querySelectorAll('[data-kind]').forEach(b => b.addEventListener('click', () => {
-      if (dicoView === 'accords') dicoChord = b.dataset.kind; else dicoScale = b.dataset.kind;
-      renderDico();
-    }));
-    stage.querySelector('[data-hear]').addEventListener('click', () => {
-      if (dicoView === 'accords') playChordNotes(midis);
-      else midis.forEach((m, i) => playNote(m, 0.5, 0.75, i * 0.3));
+    stage.querySelector('[data-r="again"]').addEventListener('click', async () => {
+      try { await Ear.start(); } catch { return; }
+      startGame(sc, mult, mode, data.settings.metro);
     });
-    clearMarks();
-    ensureVisible(midis[0]);
-    midis.forEach((m, i) => shown.set(m, i === 0 || m % 12 === dicoRoot ? 'root' : 'show'));
-    renderKeyboard();
-    if (tab === 'studio') injectStudioSeg();
+    stage.querySelector('[data-r="cfg"]').addEventListener('click', () => configGame(sc));
+    stage.querySelector('[data-r="list"]').addEventListener('click', renderJouer);
   }
 
-  function wireDicoTabs() {
-    stage.querySelectorAll('[data-v]').forEach(b => b.addEventListener('click', () => { dicoView = b.dataset.v; renderDico(); }));
+  // ---------- Navigation ----------
+  let tab = 'partition';
+  function switchTab(t) {
+    tab = t;
+    if (game) { game.done = true; cancelAnimationFrame(game.raf); game = null; }
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('tab--active', b.dataset.tab === t));
+    render();
   }
-
-  function renderCof() {
-    const cx = 50, cy = 50, r1 = 28, r2 = 48;
-    let segs = '', labels = '';
-    for (let i = 0; i < 12; i++) {
-      const a0 = (i * 30 - 105) * Math.PI / 180;
-      const a1 = (i * 30 - 75) * Math.PI / 180;
-      const p = (r, a) => `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`;
-      segs += `<path class="cof__seg ${i === cofSel ? 'cof__seg--on' : ''}" data-seg="${i}"
-        d="M ${p(r1, a0)} A ${r1} ${r1} 0 0 1 ${p(r1, a1)} L ${p(r2, a1)} A ${r2} ${r2} 0 0 0 ${p(r2, a0)} Z"/>`;
-      const am = (i * 30 - 90) * Math.PI / 180;
-      const lx = cx + 40 * Math.cos(am), ly = cy + 40 * Math.sin(am);
-      const mx = cx + 33.5 * Math.cos(am), my = cy + 33.5 * Math.sin(am);
-      labels += `<text class="cof__maj" x="${lx.toFixed(1)}" y="${(ly + 2.4).toFixed(1)}" text-anchor="middle">${COF[i][0]}</text>`;
-      labels += `<text class="cof__min" x="${mx.toFixed(1)}" y="${(my + 1.6).toFixed(1)}" text-anchor="middle">${COF[i][1]}</text>`;
-    }
-    const sel = COF[cofSel];
-    const pc = COF_PC[cofSel];
-    const scale = SCALES['Majeure'].iv.map(i => (pc + i) % 12);
-    const chordBtns = DEGREES.map((d, i) => {
-      const rootPc = scale[i];
-      const minor = d === d.toLowerCase() && !d.includes('°');
-      const dim = d.includes('°');
-      const names = prog.labels === 'en' ? EN : FR;
-      const nm = names[rootPc] + (dim ? 'dim' : minor ? 'm' : '');
-      return `<button class="pill pill--small" data-deg="${i}" type="button">${d} · ${nm}</button>`;
-    }).join('');
-    return `
-      <div class="card cof-wrap">
-        <svg class="cof" viewBox="0 0 100 100">${segs}${labels}</svg>
-        <div class="cof-info">
-          <div class="cof-info__key">${sel[0]} majeur <span style="color:var(--text-dim)">· relative ${sel[1]}</span></div>
-          <div class="cof-info__sig">Armure : ${sel[2]}</div>
-          <div class="cof-chords">${chordBtns}</div>
-          <div class="dico-result__hint" style="margin-top:8px">Tape un degré pour l'entendre et le voir sur le clavier.</div>
-        </div>
-      </div>`;
+  $('tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (b) switchTab(b.dataset.tab);
+  });
+  function render() {
+    if (tab === 'partition') renderPartition();
+    else renderJouer();
   }
-
-  function wireCof() {
-    stage.querySelectorAll('[data-seg]').forEach(s => s.addEventListener('click', () => {
-      cofSel = Number(s.dataset.seg);
-      renderDico();
-    }));
-    stage.querySelectorAll('[data-deg]').forEach(b => b.addEventListener('click', () => {
-      const i = Number(b.dataset.deg);
-      const pc = COF_PC[cofSel];
-      const scale = SCALES['Majeure'].iv;
-      const rootPc = (pc + scale[i]) % 12;
-      const minor = ['ii', 'iii', 'vi'].includes(DEGREES[i]);
-      const dim = DEGREES[i] === 'vii°';
-      const iv = dim ? CHORDS['Dim'].iv : minor ? CHORDS['Mineur'].iv : CHORDS['Majeur'].iv;
-      const base = 60 + rootPc > 67 ? 48 + rootPc : 60 + rootPc;
-      const midis = iv.map(x => base + x);
-      clearMarks();
-      ensureVisible(midis[0]);
-      midis.forEach((m, k) => shown.set(m, k === 0 ? 'root' : 'show'));
-      renderKeyboard();
-      playChordNotes(midis);
-    }));
-  }
-
-  // ---------- Init ----------
-  labelsBtnText();
-  renderKeyboard();
   render();
-
-  // Portrait ↔ paysage : le clavier passe de 2 à 3 octaves.
-  let lastOrient = window.innerWidth > window.innerHeight;
-  function onResize() {
-    const nowLandscape = window.innerWidth > window.innerHeight;
-    if (nowLandscape === lastOrient && WHITE_PER_VIEW === whitesPerView()) return;
-    lastOrient = nowLandscape;
-    WHITE_PER_VIEW = whitesPerView();
-    renderKeyboard();
-  }
-  window.addEventListener('resize', onResize);
-  window.addEventListener('orientationchange', () => setTimeout(onResize, 120));
 })();
