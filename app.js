@@ -106,18 +106,24 @@
   // 2) hauteur par YIN (CMNDF + seuil absolu + interpolation parabolique),
   //    bien plus robuste que l'autocorrélation simple ;
   // 3) machine à états note ouverte / silence -> événements {m, t0, t1}.
-  const GATE = 0.010;
   const Ear = {
     stream: null, analyser: null, timer: null, on: false,
     onNote: null,     // (midi, tSec) à l'ouverture d'une note
     onEvent: null,    // ({m,t0,t1}) à la fermeture
     live: null,       // (texte) indicateur temps réel
+    meter: null,      // (rms, gate) vu-mètre
+    noise: 0.0012, frames: 0,
     _buf: null, _hist: [], _cur: null, _pend: null, _silent: 0, _lastOn: 0,
+    // Seuil ADAPTATIF : 3,5 × le bruit de fond mesuré en continu — capte
+    // aussi bien un vrai piano qu'une vidéo sur les enceintes de l'ordi.
+    get gate() { return Math.min(0.02, Math.max(0.002, this.noise * 3.5)); },
     async start() {
       if (this.on) return;
       audio();
       this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        // autoGainControl ON : le micro remonte tout seul les sources
+        // faibles (enceintes d'ordinateur, piano à 3 mètres)
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true },
       });
       const src = actx.createMediaStreamSource(this.stream);
       this.analyser = actx.createAnalyser();
@@ -125,6 +131,7 @@
       src.connect(this.analyser);
       this._buf = new Float32Array(2048);
       this._hist = []; this._cur = null; this._pend = null; this._silent = 0;
+      this.noise = 0.0012; this.frames = 0;
       this.timer = setInterval(() => this._tick(), 25);
       this.on = true;
       listenUI(true);
@@ -146,18 +153,24 @@
     _tick() {
       const now = actx.currentTime;
       this.analyser.getFloatTimeDomainData(this._buf);
-      const { f, rms } = yin(this._buf, actx.sampleRate);
-      // enveloppe -> attaque : montée franche au-dessus de la médiane récente
+      const gate = this.gate;
+      const { f, rms } = yin(this._buf, actx.sampleRate, gate);
+      // bruit de fond : suivi sur les trames calmes (+ calibration au départ)
+      this.frames++;
+      if (this.frames < 15 || rms < gate * 1.2) this.noise = this.noise * 0.94 + rms * 0.06;
+      if (this.meter) this.meter(rms, gate);
+      // attaque : montée franche par rapport aux trames juste avant
+      const prev = this._hist.length ? this._hist.slice(-5, -1) : [];
+      const ref = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : 0;
       this._hist.push(rms);
       if (this._hist.length > 14) this._hist.shift();
-      const med = median(this._hist);
-      const onset = rms > GATE * 1.6 && rms > med * 2.3 && (now - this._lastOn) > 0.09;
+      const onset = rms > gate * 1.3 && rms > ref * 1.7 && (now - this._lastOn) > 0.09;
       if (onset) this._lastOn = now;
 
       const midi = f > 0 ? Math.round(69 + 12 * Math.log2(f / 440)) : -1;
       const okPitch = midi >= 21 && midi <= 108;
 
-      if (rms < GATE || !okPitch) {
+      if (rms < gate || !okPitch) {
         this._silent++;
         if (this._silent >= 3) { this._close(now - 0.05); this._pend = null; if (this.live) this.live(''); }
         return;
@@ -201,12 +214,12 @@
     return s[s.length >> 1];
   }
   // YIN : différence cumulative normalisée + seuil absolu + parabole.
-  function yin(buf, sr) {
+  function yin(buf, sr, gate) {
     const SIZE = buf.length, HALF = SIZE >> 1;
     let rms = 0;
     for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
     rms = Math.sqrt(rms / SIZE);
-    if (rms < GATE) return { f: -1, rms };
+    if (rms < gate) return { f: -1, rms };
     const tauMin = Math.max(20, Math.floor(sr / 2100));   // ~Do7
     const tauMax = Math.min(HALF - 2, Math.ceil(sr / 50)); // ~Sol1
     const d = new Float32Array(tauMax + 2);
@@ -242,7 +255,8 @@
     liveEl.hidden = !on;
     if (on) liveEl.textContent = '· · ·';
   }
-  Ear.live = (txt) => { if (!liveEl.hidden) liveEl.textContent = txt || '· · ·'; };
+  const baseLive = (txt) => { if (!liveEl.hidden) liveEl.textContent = txt || '· · ·'; };
+  Ear.live = baseLive;
   $('listenBtn').addEventListener('click', async () => {
     if (Ear.on) { Ear.stop(); return; }
     try { await Ear.start(); }
@@ -421,7 +435,7 @@
   function renderPartition() {
     headSub.textContent = 'Ce qui se joue s\'écrit';
     stopPlayback();
-    Ear.onNote = null; Ear.onEvent = null;
+    Ear.onNote = null; Ear.onEvent = null; Ear.meter = null; Ear.live = baseLive;
     if (rec) { renderRecording(); return; }
     const scores = data.scores.slice().reverse();
     const rows = scores.map(sc => `
@@ -455,7 +469,8 @@
     stage.innerHTML = `
       <div class="card">
         <div class="rec-head"><span class="rec-dot"></span><span class="card__title">J'écoute…</span><span class="rec-count" id="recCount">0 note</span></div>
-        <div class="card__sub">Joue naturellement — les pauses deviendront des soupirs et des silences sur la portée.</div>
+        <div class="vu"><i id="vuBar"></i><b id="vuGate"></b></div>
+        <div class="vurow"><span id="vuNote" class="vunote">—</span><span class="vuhint" id="vuHint">Le trait doit bouger avec la musique</span></div>
         <div class="score-scroll" id="recScore">${scoreSVG({ notes: [], bpb: 4 })}</div>
         <div class="session__row" style="justify-content:flex-start">
           <button class="btn btn--small" id="recStop" type="button">■ Terminer</button>
@@ -463,7 +478,23 @@
         </div>
       </div>`;
     $('recStop').addEventListener('click', stopRecording);
-    $('recCancel').addEventListener('click', () => { rec = null; Ear.onEvent = null; Ear.onNote = null; renderPartition(); });
+    $('recCancel').addEventListener('click', () => { rec = null; Ear.onEvent = null; Ear.onNote = null; Ear.meter = null; renderPartition(); });
+    // vu-mètre : on VOIT ce que l'oreille entend (niveau + seuil + note)
+    const started = Date.now();
+    Ear.meter = (rms, gate) => {
+      const bar = $('vuBar'), g = $('vuGate'), n = $('vuNote'), hint = $('vuHint');
+      if (!bar) return;
+      const pct = Math.min(100, Math.pow(rms / 0.12, 0.5) * 100);
+      bar.style.width = pct + '%';
+      bar.classList.toggle('vu--hot', rms > gate);
+      g.style.left = Math.min(100, Math.pow(gate / 0.12, 0.5) * 100) + '%';
+      if (hint && Date.now() - started > 6000) {
+        hint.textContent = rec && rec.events.length
+          ? 'Ça rentre — continue !'
+          : 'Je n\'entends rien : monte le son de la vidéo ou rapproche le téléphone';
+      }
+    };
+    Ear.live = (txt) => { baseLive(txt); const n = $('vuNote'); if (n) n.textContent = txt || '—'; };
     renderRecLive();
   }
   let recThrottle = 0;
@@ -529,7 +560,7 @@
   function renderJouer() {
     headSub.textContent = 'Joue en rythme, sur ton vrai piano';
     stopPlayback();
-    Ear.onNote = null; Ear.onEvent = null;
+    Ear.onNote = null; Ear.onEvent = null; Ear.meter = null; Ear.live = baseLive;
     const mine = data.scores.slice().reverse();
     const cards = BUILTINS.map(sc => gameCard(sc)).join('');
     const mineRows = mine.map(sc => gameCard(sc)).join('');
@@ -626,19 +657,31 @@
     const canvas = $('gCanvas');
     const dpr = Math.min(2.5, window.devicePixelRatio || 1);
     const wrapW = canvas.parentElement.clientWidth - 2;
-    const H = window.innerHeight > window.innerWidth ? 300 : Math.max(240, window.innerHeight - 230);
+    const H = window.innerHeight > window.innerWidth
+      ? Math.max(320, Math.min(470, window.innerHeight - 330))
+      : Math.max(240, window.innerHeight - 220);
     canvas.style.height = H + 'px';
     canvas.width = wrapW * dpr; canvas.height = H * dpr;
     const ctx2 = canvas.getContext('2d');
     ctx2.scale(dpr, dpr);
     const W = wrapW;
 
-    const lo = Math.min(...sc.notes.map(n => n.m)) - 1;
-    const hi = Math.max(...sc.notes.map(n => n.m)) + 1;
-    const laneH = H / (hi - lo + 1);
-    const yFor = (m) => H - (m - lo + 0.5) * laneH;
-    const PXB = Math.max(60, Math.min(110, spb >= 0.5 ? 80 : 110));
-    const hitX = Math.round(W * 0.18);
+    // ----- le PIANO en bas, les notes tombent dessus (façon Synthesia) -----
+    const KB_H = Math.max(58, Math.min(86, H * 0.2));
+    const kbTop = H - KB_H;
+    let lo = Math.min(...sc.notes.map(n => n.m)) - 1;
+    let hi = Math.max(...sc.notes.map(n => n.m)) + 1;
+    while (BLACK.has(((lo % 12) + 12) % 12)) lo--;
+    while (BLACK.has(((hi % 12) + 12) % 12)) hi++;
+    const whites = [];
+    for (let m = lo; m <= hi; m++) if (!BLACK.has(m % 12)) whites.push(m);
+    const wW = W / whites.length;
+    const xFor = (m) => {
+      if (!BLACK.has(m % 12)) return (whites.indexOf(m) + 0.5) * wW;
+      return (whites.indexOf(m - 1) + 1) * wW;     // la noire, à la frontière
+    };
+    const PXB = Math.max(64, Math.min(130, (H - KB_H) / 3.2));
+    const keyFlash = {};   // midi -> {t, color}
 
     const st = {
       notes: sc.notes.map(n => ({ ...n, state: 0 })),   // 0 à venir, 1 parfait, 2 bien, 3 raté
@@ -716,40 +759,80 @@
       $('gNext').textContent = next ? noteName(next.m) : '';
       $('gProg').style.width = Math.min(100, Math.max(0, pos / beatsTotal * 100)) + '%';
 
-      // scène
+      // scène : couloir de chute
       ctx2.clearRect(0, 0, W, H);
-      for (let m = lo; m <= hi; m++) {
-        if (BLACK.has(m % 12)) { ctx2.fillStyle = 'rgba(255,255,255,0.035)'; ctx2.fillRect(0, yFor(m) - laneH / 2, W, laneH); }
-        if (m % 12 === 0) { ctx2.strokeStyle = 'rgba(217,179,106,0.25)'; ctx2.beginPath(); ctx2.moveTo(0, yFor(m) + laneH / 2); ctx2.lineTo(W, yFor(m) + laneH / 2); ctx2.stroke(); }
+      // guides verticaux des octaves (les Do)
+      for (const m of whites) {
+        if (m % 12 === 0) {
+          ctx2.strokeStyle = 'rgba(217,179,106,0.18)';
+          ctx2.beginPath();
+          ctx2.moveTo(whites.indexOf(m) * wW, 0);
+          ctx2.lineTo(whites.indexOf(m) * wW, kbTop);
+          ctx2.stroke();
+        }
       }
-      // ligne d'or
-      ctx2.fillStyle = wrongFlash && actx.currentTime - wrongFlash < 0.18 ? 'rgba(226,109,92,0.8)' : 'rgba(217,179,106,0.9)';
-      ctx2.fillRect(hitX - 2, 0, 3, H);
-      // notes
-      const colors = ['#7D88C4', '#D9B36A', '#6FBF8F', 'rgba(226,109,92,0.45)'];
+      // notes qui tombent : le BAS de la note touche le clavier pile au moment de jouer
+      const colors = ['#7D88C4', '#D9B36A', '#6FBF8F', 'rgba(226,109,92,0.5)'];
       for (const n of st.notes) {
-        const x = hitX + (n.s - pos) * PXB;
-        const wN = Math.max(14, n.d * PXB - 4);
-        if (x + wN < -20 || x > W + 20) continue;
-        const y = yFor(n.m);
+        const isB = BLACK.has(n.m % 12);
+        const wN = isB ? wW * 0.55 : wW * 0.82;
+        const x = xFor(n.m) - wN / 2;
+        const hN = Math.max(18, n.d * PXB - 5);
+        const yBot = kbTop - (n.s - pos) * PXB;
+        const yTop = yBot - hN;
+        if (yBot < -10 || yTop > kbTop + 10) continue;
         ctx2.fillStyle = colors[n.state];
         ctx2.beginPath();
-        const nh = Math.min(laneH * 0.88, 22), ny = y - nh / 2;
-        if (ctx2.roundRect) ctx2.roundRect(x, ny, wN, nh, 6);
-        else ctx2.rect(x, ny, wN, nh);
+        const yb = Math.min(yBot, kbTop);
+        if (ctx2.roundRect) ctx2.roundRect(x, yTop, wN, yb - yTop, 5);
+        else ctx2.rect(x, yTop, wN, yb - yTop);
         ctx2.fill();
-        if (laneH > 13 || n.state === 0) {
-          ctx2.fillStyle = n.state === 0 ? 'rgba(255,255,255,0.85)' : 'rgba(11,11,18,0.75)';
-          ctx2.font = '600 10px Inter, sans-serif';
-          ctx2.fillText(FR[n.m % 12], x + 4, y + 3.5);
+        if (wN > 15 && yb - yTop > 15) {
+          ctx2.fillStyle = n.state === 0 ? 'rgba(255,255,255,0.9)' : 'rgba(11,11,18,0.75)';
+          ctx2.font = '600 9.5px Inter, sans-serif';
+          ctx2.textAlign = 'center';
+          ctx2.fillText(FR[n.m % 12], x + wN / 2, yb - 5);
+          ctx2.textAlign = 'left';
         }
+        // marque l'éclair sur la touche au moment du jugement
+        if (n.state > 0 && !keyFlash[n.m + '_' + n.s]) {
+          keyFlash[n.m + '_' + n.s] = 1;
+          keyFlash[n.m] = { t: actx.currentTime, c: n.state === 3 ? 'rgba(226,109,92,0.75)' : n.state === 1 ? 'rgba(217,179,106,0.9)' : 'rgba(111,191,143,0.9)' };
+        }
+      }
+      // ----- le piano -----
+      ctx2.fillStyle = '#0a0a10';
+      ctx2.fillRect(0, kbTop, W, KB_H);
+      // ligne d'or au sommet du clavier (la ligne de frappe)
+      ctx2.fillStyle = wrongFlash && actx.currentTime - wrongFlash < 0.18 ? 'rgba(226,109,92,0.9)' : 'rgba(217,179,106,0.9)';
+      ctx2.fillRect(0, kbTop - 2, W, 2.5);
+      whites.forEach((m, i) => {
+        const fl = keyFlash[m];
+        const hot = fl && actx.currentTime - fl.t < 0.3;
+        ctx2.fillStyle = hot ? fl.c : '#F4F1E8';
+        ctx2.fillRect(i * wW + 1, kbTop + 2, wW - 2, KB_H - 4);
+        if (m % 12 === 0 && wW > 17) {
+          ctx2.fillStyle = '#7A7666';
+          ctx2.font = '600 9px Inter, sans-serif';
+          ctx2.textAlign = 'center';
+          ctx2.fillText('Do' + (Math.floor(m / 12) - 1), i * wW + wW / 2, H - 6);
+          ctx2.textAlign = 'left';
+        }
+      });
+      for (let m = lo; m <= hi; m++) {
+        if (!BLACK.has(m % 12)) continue;
+        const fl = keyFlash[m];
+        const hot = fl && actx.currentTime - fl.t < 0.3;
+        const bw = wW * 0.6;
+        ctx2.fillStyle = hot ? fl.c : '#16161d';
+        ctx2.fillRect(xFor(m) - bw / 2, kbTop + 2, bw, KB_H * 0.58);
       }
       // décompte
       if (mode === 'rythme' && pos < 0) {
         ctx2.fillStyle = 'rgba(217,179,106,0.95)';
-        ctx2.font = '700 44px Inter, sans-serif';
+        ctx2.font = '700 46px Inter, sans-serif';
         ctx2.textAlign = 'center';
-        ctx2.fillText(String(Math.max(1, Math.ceil(-pos))), W / 2, H / 2 + 14);
+        ctx2.fillText(String(Math.min(4, Math.max(1, Math.ceil(-pos)))), W / 2, (H - KB_H) / 2 + 16);
         ctx2.textAlign = 'left';
       }
       // fin ?
