@@ -1,10 +1,14 @@
-const CACHE = 'piano-v7';
+const CACHE = 'piano-v8';
+// Le modèle de transcription (60 Mo) vit dans un cache SÉPARÉ et durable :
+// il survit aux mises à jour de l'app (sinon 60 Mo retéléchargés à chaque bump).
+const MODEL_CACHE = 'piano-model-v1';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
   './manifest.json',
+  './vendor/magentamusic.min.js',
   './fonts/fonts.css',
   './fonts/Inter-400-latin.woff2',
   './fonts/Inter-400-latin-ext.woff2',
@@ -27,7 +31,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== MODEL_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -35,13 +39,16 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  const isModel = url.pathname.includes('/model/');
+  const cacheName = isModel ? MODEL_CACHE : CACHE;
   const matchOpts = req.mode === 'navigate' ? { ignoreSearch: true } : undefined;
   e.respondWith(
     caches.match(req, matchOpts).then(cached => {
       const fetchPromise = fetch(req).then(resp => {
         if (resp && resp.status === 200 && resp.type === 'basic') {
           const clone = resp.clone();
-          caches.open(CACHE).then(c => c.put(req, clone));
+          caches.open(cacheName).then(c => c.put(req, clone));
         }
         return resp;
       }).catch(() => cached);

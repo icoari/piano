@@ -269,10 +269,13 @@
   // fin de note et attaque suivante deviennent des SILENCES ; les trous
   // minuscules sont absorbés dans la durée (le piano s'éteint tout seul).
   function quantize(events, name, date) {
-    events = events.filter(e => e.m >= 21 && e.m <= 108).sort((a, b) => a.t0 - b.t0);
+    events = events.filter(e => e.m >= 21 && e.m <= 108).sort((a, b) => a.t0 - b.t0 || a.m - b.m);
+    // attaques DISTINCTES (un accord = une seule attaque pour le tempo)
+    const onsets = [];
+    events.forEach(e => { if (!onsets.length || e.t0 - onsets[onsets.length - 1] > 0.06) onsets.push(e.t0); });
     const iois = [];
-    for (let i = 1; i < events.length; i++) {
-      const d = events[i].t0 - events[i - 1].t0;
+    for (let i = 1; i < onsets.length; i++) {
+      const d = onsets[i] - onsets[i - 1];
       if (d > 0.12 && d < 2.5) iois.push(d);
     }
     let beat = iois.length ? median(iois) : 0.6;
@@ -283,24 +286,39 @@
     const ref = events.length ? events[0].t0 : 0;
     const Q = (x) => Math.round(x / spb * 4) / 4;   // grille : double-croche
     const notes = [];
-    events.forEach((e, i) => {
+    const seen = new Set();
+    events.forEach((e) => {
       const s = Q(e.t0 - ref);
-      let d = Math.max(0.25, Q(Math.max(0.1, e.t1 - e.t0)));
-      const next = events[i + 1];
-      if (next) {
-        const gap = Q(next.t0 - ref) - s;
-        if (gap <= 0) return;                        // fusion de doublon
-        if (gap - d < 0.5) d = gap;                  // trou minuscule absorbé
-        d = Math.min(d, gap);
+      let d = Math.max(0.25, Q(Math.max(0.12, e.t1 - e.t0)));
+      // polyphonie : une note ne se coupe qu'à sa PROPRE reprise (une basse
+      // tenue sous la mélodie reste tenue)
+      const nextSame = events.find(x => x.m === e.m && x.t0 > e.t0 + 0.05);
+      if (nextSame) d = Math.min(d, Math.max(0.25, Q(nextSame.t0 - ref) - s));
+      // micro-trou avant l'attaque suivante : absorbé (le son décroît seul)
+      const nextT = onsets.find(t => t > e.t0 + 0.06);
+      if (nextT !== undefined) {
+        const gap = Q(nextT - ref) - s;
+        if (gap >= 0.25 && gap > d && gap - d <= 0.25) d = gap;
       }
-      d = Math.min(d, 4);
+      d = Math.min(d, 6);
+      const key = e.m + ':' + s;
+      if (seen.has(key)) return;
+      seen.add(key);
       notes.push({ m: e.m, s, d });
     });
+    notes.sort((a, b) => a.s - b.s || a.m - b.m);
     return {
       id: 'p' + Date.now().toString(36) + Math.floor(Math.random() * 99),
       name: name || null, date: date || Date.now(),
       bpm, bpb: 4, notes,
     };
+  }
+  // Mélodie d'une partition polyphonique : la ligne du haut (skyline) —
+  // la pratique standard pour extraire le chant d'un MIDI de piano.
+  function skyline(notes) {
+    const by = new Map();
+    notes.forEach(n => { const p = by.get(n.s); if (!p || n.m > p.m) by.set(n.s, n); });
+    return [...by.values()].sort((a, b) => a.s - b.s);
   }
 
   // ================= PARTITION (rendu SVG avec rythme) =================
@@ -404,11 +422,20 @@
     builtin('joie', 'Ode à la joie · Beethoven', '🎼', 'Facile', 108, 4,
       [ODE_A, ODE_A2, ODE_B, ODE_A2, ODE_B, ODE_A2].join(' '),
       [].concat(OB, OB, OBB, OB, OBB, OB.slice(0, -1), [3])),
-    builtin('twinkle', 'Ah ! vous dirai-je, maman · Mozart', '⭐', 'Néophyte', 112, 4,
-      `C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4
-       G4 G4 F4 F4 E4 E4 D4 G4 G4 F4 F4 E4 E4 D4
-       C4 C4 G4 G4 A4 A4 G4 F4 F4 E4 E4 D4 D4 C4`,
-      [1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 3]),
+    builtin('hallelujah', 'Hallelujah · Leonard Cohen', '🕊️', 'Facile', 66, 3,
+      // 1er couplet + le refrain ×2 (arrangement simplifié, tonalité de Do)
+      `G4 G4 G4 G4 G4 G4 A4 A4 A4
+       E4 G4 G4 G4 G4 A4 E4 E4 A4
+       A4 A4 A4 A4 A4 A4 B4 B4 G4
+       E4 E4 G4 G4 A4 A4 B4 B4 C5
+       E4 G4 A4 A4 A4 G4 E4 E4 E4 G4 A4 A4 A4 G4 E4 D4 C4
+       E4 G4 A4 A4 A4 G4 E4 E4 E4 G4 A4 A4 A4 G4 E4 D4 C4`,
+      [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2,
+        0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2,
+        0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2,
+        0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2,
+        0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 0.5, 0.5, 4,
+        0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1, 0.5, 0.5, 0.5, 0.5, 4]),
     builtin('greensleeves', 'Greensleeves · Traditionnel', '🍃', 'Moyen', 120, 3,
       `A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 A4 A4 G#4 A4 B4 G#4 E4
        A4 C5 D5 E5 F5 E5 D5 B4 G4 A4 B4 C5 B4 A4 G#4 F#4 G#4 A4 A4`,
@@ -449,7 +476,7 @@
     stage.innerHTML = `
       <div class="card reccard">
         <div class="card__title">Écouter &amp; transcrire</div>
-        <div class="card__sub">Pose le téléphone près du piano — quelqu'un joue (ou une vidéo tourne sur l'ordi), l'app écrit la partition : notes, rythme <strong>et silences</strong>.</div>
+        <div class="card__sub">Pose le téléphone près du piano — quelqu'un joue (ou une vidéo tourne sur l'ordi), l'app enregistre puis un <strong>réseau de neurones spécialisé piano</strong> écrit la partition : accords, deux mains, rythme <strong>et silences</strong>. Jusqu'à 1 min 30 par prise.</div>
         <button class="bigrec" id="recStart" type="button"><i></i>Enregistrer</button>
       </div>
       ${scores.length ? `<div class="card"><div class="card__title">Mes partitions</div><div class="songlist" style="margin-top:10px">${rows}</div></div>` : ''}`;
@@ -457,32 +484,67 @@
     stage.querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => openScore(el.dataset.open)));
   }
 
+  // ---- Le vrai moteur : Onsets & Frames (Google Magenta) ----
+  // Réseau de neurones spécialisé piano (entraîné sur le corpus MAESTRO),
+  // POLYPHONIQUE : accords, arpèges, pédale, deux mains — le niveau requis
+  // pour transcrire de l'Einaudi. On enregistre l'audio en entier, puis le
+  // modèle analyse. Il pèse 60 Mo, chargés une seule fois puis en cache.
+  const MODEL_URL = 'model/onsets_frames_uni';
+  let oaf = null;
+  function loadScript(src) {
+    return new Promise((ok, ko) => {
+      const s = document.createElement('script');
+      s.src = src; s.onload = ok; s.onerror = ko;
+      document.head.appendChild(s);
+    });
+  }
+  async function getModel(status) {
+    if (oaf) return oaf;
+    if (!window.mm) { status('Chargement du moteur audio…'); await loadScript('vendor/magentamusic.min.js'); }
+    status('Chargement du modèle piano — 60 Mo la toute première fois, ensuite il reste en cache…');
+    const m = new window.mm.OnsetsAndFrames(MODEL_URL);
+    await m.initialize();
+    oaf = m;
+    return m;
+  }
+
+  const REC_MAX = 90;   // secondes d'enregistrement max
   async function startRecording() {
     try { await Ear.start(); }
     catch { alert('Le micro est nécessaire pour transcrire.'); return; }
-    rec = { events: [], live: [] };
-    Ear.onEvent = (ev) => { rec.events.push(ev); renderRecLive(); };
-    Ear.onNote = () => renderRecLive(true);
+    let recorder;
+    try { recorder = new MediaRecorder(Ear.stream); }
+    catch { alert('Enregistrement audio indisponible sur cet appareil.'); return; }
+    const chunks = [];
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec = { recorder, chunks, events: [], start: Date.now(), timer: null };
+    Ear.onEvent = (ev) => rec.events.push(ev);   // secours si le modèle échoue
+    recorder.start(1000);
     renderRecording();
   }
   function renderRecording() {
     stage.innerHTML = `
       <div class="card">
-        <div class="rec-head"><span class="rec-dot"></span><span class="card__title">J'écoute…</span><span class="rec-count" id="recCount">0 note</span></div>
+        <div class="rec-head"><span class="rec-dot"></span><span class="card__title">J'enregistre…</span><span class="rec-count" id="recTime">0:00</span></div>
         <div class="vu"><i id="vuBar"></i><b id="vuGate"></b></div>
-        <div class="vurow"><span id="vuNote" class="vunote">—</span><span class="vuhint" id="vuHint">Le trait doit bouger avec la musique</span></div>
-        <div class="score-scroll" id="recScore">${scoreSVG({ notes: [], bpb: 4 })}</div>
-        <div class="session__row" style="justify-content:flex-start">
-          <button class="btn btn--small" id="recStop" type="button">■ Terminer</button>
+        <div class="vurow"><span id="vuNote" class="vunote">—</span><span class="vuhint" id="vuHint">La barre doit bouger avec la musique — l'analyse fine viendra après</span></div>
+        <div class="session__row" style="justify-content:flex-start; margin-top:14px">
+          <button class="btn btn--small" id="recStop" type="button">■ Terminer &amp; analyser</button>
           <button class="btn btn--ghost btn--small" id="recCancel" type="button">Annuler</button>
         </div>
       </div>`;
-    $('recStop').addEventListener('click', stopRecording);
-    $('recCancel').addEventListener('click', () => { rec = null; Ear.onEvent = null; Ear.onNote = null; Ear.meter = null; renderPartition(); });
-    // vu-mètre : on VOIT ce que l'oreille entend (niveau + seuil + note)
+    $('recStop').addEventListener('click', () => stopRecording(false));
+    $('recCancel').addEventListener('click', () => stopRecording(true));
     const started = Date.now();
+    rec.timer = setInterval(() => {
+      const el = $('recTime');
+      if (!el || !rec) return;
+      const s = Math.floor((Date.now() - rec.start) / 1000);
+      el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') + ' / 1:30';
+      if (s >= REC_MAX) stopRecording(false);
+    }, 500);
     Ear.meter = (rms, gate) => {
-      const bar = $('vuBar'), g = $('vuGate'), n = $('vuNote'), hint = $('vuHint');
+      const bar = $('vuBar'), g = $('vuGate'), hint = $('vuHint');
       if (!bar) return;
       const pct = Math.min(100, Math.pow(rms / 0.12, 0.5) * 100);
       bar.style.width = pct + '%';
@@ -490,31 +552,58 @@
       g.style.left = Math.min(100, Math.pow(gate / 0.12, 0.5) * 100) + '%';
       if (hint && Date.now() - started > 6000) {
         hint.textContent = rec && rec.events.length
-          ? 'Ça rentre — continue !'
-          : 'Je n\'entends rien : monte le son de la vidéo ou rapproche le téléphone';
+          ? 'Ça capte — joue, je note tout'
+          : 'Je n\'entends presque rien : monte le son ou rapproche le téléphone';
       }
     };
     Ear.live = (txt) => { baseLive(txt); const n = $('vuNote'); if (n) n.textContent = txt || '—'; };
-    renderRecLive();
   }
-  let recThrottle = 0;
-  function renderRecLive() {
-    const c = $('recCount');
-    if (c) c.textContent = rec.events.length + ' note' + (rec.events.length > 1 ? 's' : '');
-    const now = Date.now();
-    if (now - recThrottle < 400) return;
-    recThrottle = now;
-    const holder = $('recScore');
-    if (holder && rec.events.length) {
-      holder.innerHTML = scoreSVG(quantize(rec.events));
-      holder.scrollLeft = holder.scrollWidth;
+
+  async function stopRecording(cancel) {
+    if (!rec) return;
+    clearInterval(rec.timer);
+    const { recorder, chunks, events } = rec;
+    rec = null;
+    Ear.onEvent = null; Ear.onNote = null; Ear.meter = null; Ear.live = baseLive;
+    await new Promise(res => {
+      recorder.onstop = res;
+      try { recorder.state !== 'inactive' ? recorder.stop() : res(); } catch { res(); }
+      setTimeout(res, 1500);
+    });
+    Ear.stop();
+    if (cancel) { renderPartition(); return; }
+    // ----- analyse -----
+    stage.innerHTML = `
+      <div class="card anacard">
+        <div class="spinner"></div>
+        <div class="card__title">Analyse en cours</div>
+        <div class="card__sub" id="anaStatus">Préparation de l'audio…</div>
+      </div>`;
+    const status = (t) => { const el = $('anaStatus'); if (el) el.textContent = t; };
+    let sc = null;
+    try {
+      const blob = new Blob(chunks, { type: recorder.mimeType || '' });
+      if (blob.size > 1000) {
+        const arr = await blob.arrayBuffer();
+        const buf = await audio().decodeAudioData(arr);
+        const model = await getModel(status);
+        status(`Le réseau de neurones lit ${Math.round(buf.duration)} s de piano — quelques dizaines de secondes…`);
+        const ns = await model.transcribeFromAudioBuffer(buf);
+        const evs = (ns.notes || []).map(n => ({ m: n.pitch, t0: n.startTime, t1: n.endTime }));
+        if (evs.length) sc = quantize(evs);
+      }
+    } catch (e) { console.warn('Transcription IA impossible, secours YIN', e); }
+    if ((!sc || !sc.notes.length) && events.length) { sc = quantize(events); sc.fallback = true; }
+    if (!sc || !sc.notes.length) {
+      stage.innerHTML = `
+        <div class="card">
+          <div class="card__title">Je n'ai rien pu écrire</div>
+          <div class="card__sub">Aucune note exploitable — monte le son de la source, rapproche le téléphone, et réessaie. (La toute première analyse a aussi besoin d'internet pour télécharger le modèle.)</div>
+          <div class="session__row" style="justify-content:flex-start"><button class="btn btn--small" id="anaBack" type="button">Retour</button></div>
+        </div>`;
+      $('anaBack').addEventListener('click', renderPartition);
+      return;
     }
-  }
-  function stopRecording() {
-    Ear.onEvent = null; Ear.onNote = null;
-    const events = rec.events; rec = null;
-    if (!events.length) { renderPartition(); return; }
-    const sc = quantize(events);
     sc.name = 'Partition du ' + new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
       + ' · ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     data.scores.push(sc);
@@ -594,14 +683,10 @@
       <div class="card">
         <div class="session__eyebrow">${sc.icon || '𝄞'} Prêt à jouer</div>
         <div class="session__title">${esc(sc.name)}</div>
-        <div class="card__sub">Les notes défilent vers la ligne d'or — joue-les sur ton <strong>vrai piano</strong>, le micro valide. ${best ? `Record : ${best.pct} % ${'★'.repeat(best.stars)}` : ''}</div>
-        <div class="col__label" style="margin-top:14px">Tempo</div>
-        <div class="chiprow" id="gTempo">
-          <button class="chippick" data-m="0.5" type="button">Lent · 50 %</button>
-          <button class="chippick on" data-m="0.7" type="button">Tranquille · 70 %</button>
-          <button class="chippick" data-m="0.85" type="button">Presque · 85 %</button>
-          <button class="chippick" data-m="1" type="button">Réel · 100 %</button>
-        </div>
+        <div class="card__sub">Les notes tombent sur le clavier — joue-les sur ton <strong>vrai piano</strong>, le micro valide. Mélodie : ${skyline(sc.notes).length} notes${skyline(sc.notes).length !== sc.notes.length ? ` (ligne du haut, sur ${sc.notes.length})` : ''}. ${best ? `Record : ${best.pct} % ${'★'.repeat(best.stars)}` : ''}</div>
+        <div class="col__label" style="margin-top:14px">Vitesse — <span id="gTv">60 % · ♩ = ${Math.round(sc.bpm * 0.6)}</span></div>
+        <input type="range" id="gTempo" class="tslider" min="25" max="100" step="5" value="60" aria-label="Vitesse du morceau">
+        <div class="tslider__ends"><span>🐢 très lent</span><span>tempo réel 🎼</span></div>
         <div class="col__label" style="margin-top:12px">Mode</div>
         <div class="chiprow" id="gMode">
           <button class="chippick on" data-mode="rythme" type="button">En rythme 🎯</button>
@@ -614,11 +699,10 @@
           <button class="btn btn--ghost btn--small" id="gBack" type="button">Retour</button>
         </div>
       </div>`;
-    let mult = 0.7, mode = 'rythme';
-    $('gTempo').addEventListener('click', e => {
-      const b = e.target.closest('[data-m]'); if (!b) return;
-      mult = Number(b.dataset.m);
-      $('gTempo').querySelectorAll('.chippick').forEach(x => x.classList.toggle('on', x === b));
+    let mult = 0.6, mode = 'rythme';
+    $('gTempo').addEventListener('input', () => {
+      mult = Number($('gTempo').value) / 100;
+      $('gTv').textContent = Math.round(mult * 100) + ' % · ♩ = ' + Math.round(sc.bpm * mult);
     });
     $('gMode').addEventListener('click', e => {
       const b = e.target.closest('[data-mode]'); if (!b) return;
@@ -642,7 +726,8 @@
   function startGame(sc, mult, mode, metro) {
     stopPlayback();
     const spb = 60 / (sc.bpm * mult);
-    const total = sc.notes.length;
+    // partition polyphonique -> on joue la MÉLODIE (ligne du haut)
+    const seq = skyline(sc.notes);
     stage.innerHTML = `
       <div class="gamewrap">
         <div class="gamehud">
@@ -669,8 +754,8 @@
     // ----- le PIANO en bas, les notes tombent dessus (façon Synthesia) -----
     const KB_H = Math.max(58, Math.min(86, H * 0.2));
     const kbTop = H - KB_H;
-    let lo = Math.min(...sc.notes.map(n => n.m)) - 1;
-    let hi = Math.max(...sc.notes.map(n => n.m)) + 1;
+    let lo = Math.min(...seq.map(n => n.m)) - 1;
+    let hi = Math.max(...seq.map(n => n.m)) + 1;
     while (BLACK.has(((lo % 12) + 12) % 12)) lo--;
     while (BLACK.has(((hi % 12) + 12) % 12)) hi++;
     const whites = [];
@@ -684,7 +769,7 @@
     const keyFlash = {};   // midi -> {t, color}
 
     const st = {
-      notes: sc.notes.map(n => ({ ...n, state: 0 })),   // 0 à venir, 1 parfait, 2 bien, 3 raté
+      notes: seq.map(n => ({ ...n, state: 0 })),   // 0 à venir, 1 parfait, 2 bien, 3 raté
       score: 0, combo: 0, maxCombo: 0, perfects: 0, goods: 0,
       startT: audio().currentTime + 4 * spb + 0.2,      // 4 temps de décompte
       done: false, idx: 0, waitPos: 0, waiting: false, raf: 0, lastBeatTick: -1,
@@ -849,7 +934,7 @@
     st.done = true;
     cancelAnimationFrame(st.raf);
     Ear.onNote = null;
-    const total = sc.notes.length;
+    const total = st.notes.length;
     const hit = st.perfects + st.goods;
     const pct = Math.round(hit / total * 100);
     const stars = pct >= 95 ? 3 : pct >= 75 ? 2 : pct >= 45 ? 1 : 0;

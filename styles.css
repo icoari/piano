@@ -665,3 +665,10 @@ a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outlin
 .vurow { display: flex; align-items: baseline; gap: 10px; margin-top: 7px; }
 .vunote { font-size: 14px; font-weight: 700; color: var(--accent); min-width: 44px; }
 .vuhint { font-size: 11.5px; color: var(--text-faint); }
+
+/* Jauge de vitesse */
+.tslider { width: 100%; margin-top: 10px; accent-color: var(--accent); height: 26px; }
+.tslider__ends { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-faint); margin-top: 2px; }
+.anacard { text-align: center; padding: 30px 18px; }
+.spinner { width: 34px; height: 34px; margin: 0 auto 14px; border-radius: 50%; border: 3px solid var(--surface-hover); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
