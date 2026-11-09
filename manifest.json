@@ -1,14 +1,15 @@
 {
-  "name": "Piano — l'atelier du clavier",
+  "name": "Piano",
   "short_name": "Piano",
-  "description": "Apprends le piano de zéro : leçons guidées, mélodies pas à pas, accords, gammes et entraînement de l'oreille.",
+  "description": "Écoute un morceau joué et en écrit la partition, puis te la fait rejouer en rythme sur ton vrai piano.",
+  "lang": "fr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#0B0B12",
-  "theme_color": "#0B0B12",
+  "background_color": "#F4EFE6",
+  "theme_color": "#F4EFE6",
   "icons": [
-    { "src": "icons/icon-192-v3.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512-v3.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "icons/icon-192-v4.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512-v4.png", "sizes": "512x512", "type": "image/png" }
   ]
 }

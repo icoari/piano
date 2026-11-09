@@ -1,4 +1,4 @@
-const CACHE = 'piano-v8';
+const CACHE = 'piano-v9';
 // Le modèle de transcription (60 Mo) vit dans un cache SÉPARÉ et durable :
 // il survit aux mises à jour de l'app (sinon 60 Mo retéléchargés à chaque bump).
 const MODEL_CACHE = 'piano-model-v1';
@@ -7,15 +7,17 @@ const ASSETS = [
   './index.html',
   './styles.css',
   './app.js',
+  './modules/transcription.js',
+  './modules/notation.js',
+  './modules/icons.js',
   './manifest.json',
   './vendor/magentamusic.min.js',
-  './fonts/fonts.css',
-  './fonts/Inter-400-latin.woff2',
-  './fonts/Inter-400-latin-ext.woff2',
-  './icons/icon.svg',
-  './icons/icon-180-v3.png',
-  './icons/icon-192-v3.png',
-  './icons/icon-512-v3.png',
+  './fonts/fraunces.woff2',
+  './fonts/inter.woff2',
+  './icons/icon-v4.svg',
+  './icons/icon-180-v4.png',
+  './icons/icon-192-v4.png',
+  './icons/icon-512-v4.png',
 ];
 
 self.addEventListener('install', (e) => {
